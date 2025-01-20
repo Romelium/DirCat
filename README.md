@@ -61,7 +61,7 @@ To build DirCat, you will need to have CMake and a C++20 compatible compiler ins
 
 ### Options
 
-- `-m, --max-size <MB>`: Maximum file size in MB (default: 10)
+- `-m, --max-size <bytes>`: Maximum file size in bytes (no limit by default)
 - `-n, --no-recursive`: Disable recursive directory search
 - `-e, --ext <ext>`: Process only files with the specified extension (can be used multiple times)
 - `-d, --dot-folders`: Include folders starting with a dot (ignored by default)
@@ -76,10 +76,10 @@ Display all files in the current directory:
 ./dircat .
 ```
 
-Process only C++ files up to 20MB in size:
+Process only C++ files up to 1024 bytes in size:
 
 ```bash
-./dircat . --max-size 20 --ext cpp
+./dircat . --max-size 1024 --ext cpp
 ```
 
 Process files in the current directory without recursion:
