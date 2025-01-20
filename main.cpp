@@ -21,6 +21,9 @@ public:
     size_t maxFileSizeMB = 10;
     bool recursiveSearch = true;
     std::vector<std::string> fileExtensions;
+    bool ignoreDotFolders = true;
+    std::vector<std::string> ignoredFolders;
+    std::vector<std::string> ignoredFiles; // Added to ignore specific files
   };
 
 private:
@@ -112,9 +115,22 @@ private:
       return true;
     const auto ext = path.extension().string();
     if (ext.empty())
-        return false;
+      return false;
     return std::find(config.fileExtensions.begin(), config.fileExtensions.end(),
                      ext.substr(1)) != config.fileExtensions.end();
+  }
+
+  bool shouldIgnoreFolder(const fs::path &path) const {
+    if (config.ignoreDotFolders && path.filename().string().front() == '.') {
+      return true;
+    }
+    return std::find(config.ignoredFolders.begin(), config.ignoredFolders.end(),
+                     path.filename().string()) != config.ignoredFolders.end();
+  }
+
+  bool shouldIgnoreFile(const fs::path &path) const {
+    return std::find(config.ignoredFiles.begin(), config.ignoredFiles.end(),
+                     path.filename().string()) != config.ignoredFiles.end();
   }
 
   void printToConsole(const std::string &message) const {
@@ -130,21 +146,29 @@ private:
   std::vector<fs::path> collectFiles() const {
     std::vector<fs::path> files;
     try {
+      auto iterator = fs::recursive_directory_iterator(
+          config.dirPath, fs::directory_options::skip_permission_denied);
       if (config.recursiveSearch) {
-        for (const auto &entry :
-             fs::recursive_directory_iterator(config.dirPath, fs::directory_options::skip_permission_denied)) {
+        for (const auto &entry : iterator) {
           if (shouldStop)
             break;
-          if (fs::is_regular_file(entry) && isFileExtensionAllowed(entry)) {
+          if (fs::is_directory(entry) && shouldIgnoreFolder(entry.path())) {
+            iterator.disable_recursion_pending();
+            continue;
+          }
+          if (fs::is_regular_file(entry) && isFileExtensionAllowed(entry) &&
+              !shouldIgnoreFile(entry.path())) {
             files.push_back(entry.path());
           }
         }
       } else {
-        for (const auto &entry :
-             fs::directory_iterator(config.dirPath, fs::directory_options::skip_permission_denied)) {
+        for (const auto &entry : fs::directory_iterator(
+                 config.dirPath,
+                 fs::directory_options::skip_permission_denied)) {
           if (shouldStop)
             break;
-          if (fs::is_regular_file(entry) && isFileExtensionAllowed(entry)) {
+          if (fs::is_regular_file(entry) && isFileExtensionAllowed(entry) &&
+              !shouldIgnoreFile(entry.path())) {
             files.push_back(entry.path());
           }
         }
@@ -182,7 +206,8 @@ public:
 
     auto files = collectFiles();
     if (files.empty()) {
-      printToConsole(std::format("No matching files found in: {}\n", config.dirPath.string()));
+      printToConsole(std::format("No matching files found in: {}\n",
+                                 config.dirPath.string()));
       return true;
     }
 
@@ -212,8 +237,8 @@ public:
 DirectoryProcessor *globalProcessor = nullptr;
 void signalHandler(int signum) {
   if (globalProcessor) {
-      std::cout << "\nInterrupt received, stopping...\n";
-      globalProcessor->stop();
+    std::cout << "\nInterrupt received, stopping...\n";
+    globalProcessor->stop();
   }
 }
 
@@ -224,7 +249,12 @@ int main(int argc, char *argv[]) {
         << "Options:\n"
         << "  -m, --max-size <MB>    Maximum file size in MB (default: 10)\n"
         << "  -n, --no-recursive     Disable recursive search\n"
-        << "  -e, --ext <ext>        Process only files with given extension (can be used multiple times)\n";
+        << "  -e, --ext <ext>        Process only files with given extension "
+           "(can be used multiple times)\n"
+        << "  -d, --dot-folders      Include folders starting with a dot\n"
+        << "  -i, --ignore <item>    Ignore specific folder or file (can be "
+           "used "
+           "multiple times)\n";
     return 1;
   }
 
@@ -241,6 +271,19 @@ int main(int argc, char *argv[]) {
         config.recursiveSearch = false;
       } else if ((arg == "-e" || arg == "--ext") && i + 1 < argc) {
         config.fileExtensions.push_back(argv[++i]);
+      } else if (arg == "-d" || arg == "--dot-folders") {
+        config.ignoreDotFolders = false;
+      } else if ((arg == "-i" || arg == "--ignore") && i + 1 < argc) {
+        // Check if the ignored item is a file or a folder
+        fs::path itemPath = fs::path(config.dirPath) / argv[++i];
+        if (fs::is_regular_file(itemPath)) {
+          config.ignoredFiles.push_back(itemPath.filename().string());
+        } else if (fs::is_directory(itemPath)) {
+          config.ignoredFolders.push_back(itemPath.filename().string());
+        } else {
+          std::cerr << "Warning: Ignored item '" << itemPath.string()
+                    << "' is neither a file nor a directory.\n";
+        }
       } else {
         std::cerr << "Invalid option: " << arg << "\n";
         return 1;
