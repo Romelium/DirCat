@@ -8,6 +8,8 @@ DirCat is a high-performance C++ utility that concatenates and displays the cont
 - Recursive directory traversal (optional)
 - File extension filtering
 - Maximum file size limiting
+- Ignore specific folders
+- Ignore specific files
 - Formatted output with file names and syntax highlighting markers
 - Graceful interrupt handling
 - Memory-efficient streaming of large files
@@ -18,6 +20,38 @@ DirCat is a high-performance C++ utility that concatenates and displays the cont
 - CMake 3.10 or higher
 - Standard C++ libraries
 
+## Building
+
+To build DirCat, you will need to have CMake and a C++20 compatible compiler installed on your system. Follow these steps to build the project:
+
+1. Clone the repository:
+
+   ```bash
+   git clone https://github.com/your-username/dircat.git
+   cd dircat
+   ```
+
+2. Create a build directory and navigate into it:
+
+   ```bash
+   mkdir build
+   cd build
+   ```
+
+3. Run CMake to configure the project:
+
+   ```bash
+   cmake .. -DCMAKE_BUILD_TYPE=Release
+   ```
+
+4. Build the project:
+
+   ```bash
+   cmake --build . --config Release
+   ```
+
+   This will create the `dircat` executable in the `build` directory.
+
 ## Usage
 
 ```bash
@@ -26,9 +60,11 @@ DirCat is a high-performance C++ utility that concatenates and displays the cont
 
 ### Options
 
-- `--max-size <MB>`: Maximum file size in MB (default: 10)
-- `--no-recursive`: Disable recursive directory search
-- `--ext <ext>`: Process only files with the specified extension
+- `-m, --max-size <MB>`: Maximum file size in MB (default: 10)
+- `-n, --no-recursive`: Disable recursive directory search
+- `-e, --ext <ext>`: Process only files with the specified extension (can be used multiple times)
+- `-d, --dot-folders`: Include folders starting with a dot (ignored by default)
+- `-i, --ignore <item>`: Ignore specific folder or file (can be used multiple times)
 
 ### Examples
 
@@ -48,6 +84,18 @@ Process files in the current directory without recursion:
 
 ```bash
 ./dircat . --no-recursive
+```
+
+Ignore `build` folder and `temp.txt` file:
+
+```bash
+./dircat . --ignore build --ignore temp.txt
+```
+
+Include folders starting with a dot:
+
+```bash
+./dircat . --dot-folders
 ```
 
 ## Output Format
@@ -74,3 +122,7 @@ Files are output in the following format:
 - Skip files exceeding size limit
 - Thread-safe error logging
 - Signal handling for clean interruption
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
