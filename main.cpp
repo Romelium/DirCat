@@ -277,12 +277,12 @@ int main(int argc, char *argv[]) {
            "limit)\n"
         << "  -n, --no-recursive     Disable recursive search\n"
         << "  -e, --ext <ext>        Process only files with given extension "
-           "(can be used multiple times)\n"
+           "(can be used multiple times, grouped)\n"
         << "  -d, --dot-folders      Include folders starting with a dot\n"
         << "  -i, --ignore <item>    Ignore specific folder or file (can be "
-           "used multiple times)\n"
+           "used multiple times, grouped)\n"
         << "  -r, --regex <pattern>  Exclude files matching the regex pattern "
-           "(can be used multiple times)\n";
+           "(can be used multiple times, grouped)\n";
     return 1;
   }
 
@@ -297,23 +297,29 @@ int main(int argc, char *argv[]) {
         config.maxFileSizeB = std::stoll(argv[++i]);
       } else if (arg == "-n" || arg == "--no-recursive") {
         config.recursiveSearch = false;
-      } else if ((arg == "-e" || arg == "--ext") && i + 1 < argc) {
-        config.fileExtensions.push_back(argv[++i]);
+      } else if (arg == "-e" || arg == "--ext") {
+        while (i + 1 < argc && argv[i + 1][0] != '-') {
+          config.fileExtensions.push_back(argv[++i]);
+        }
       } else if (arg == "-d" || arg == "--dot-folders") {
         config.ignoreDotFolders = false;
-      } else if ((arg == "-i" || arg == "--ignore") && i + 1 < argc) {
-        // Check if the ignored item is a file or a folder
-        fs::path itemPath = fs::path(config.dirPath) / argv[++i];
-        if (fs::is_regular_file(itemPath)) {
-          config.ignoredFiles.push_back(itemPath.filename().string());
-        } else if (fs::is_directory(itemPath)) {
-          config.ignoredFolders.push_back(itemPath.filename().string());
-        } else {
-          std::cerr << "Warning: Ignored item '" << itemPath.string()
-                    << "' is neither a file nor a directory.\n";
+      } else if (arg == "-i" || arg == "--ignore") {
+        while (i + 1 < argc && argv[i + 1][0] != '-') {
+          // Check if the ignored item is a file or a folder
+          fs::path itemPath = fs::path(config.dirPath) / argv[++i];
+          if (fs::is_regular_file(itemPath)) {
+            config.ignoredFiles.push_back(itemPath.filename().string());
+          } else if (fs::is_directory(itemPath)) {
+            config.ignoredFolders.push_back(itemPath.filename().string());
+          } else {
+            std::cerr << "Warning: Ignored item '" << itemPath.string()
+                      << "' is neither a file nor a directory.\n";
+          }
         }
-      } else if ((arg == "-r" || arg == "--regex") && i + 1 < argc) {
-        config.regexFilters.push_back(argv[++i]);
+      } else if (arg == "-r" || arg == "--regex") {
+        while (i + 1 < argc && argv[i + 1][0] != '-') {
+          config.regexFilters.push_back(argv[++i]);
+        }
       } else {
         std::cerr << "Invalid option: " << arg << "\n";
         return 1;
