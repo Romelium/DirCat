@@ -208,6 +208,15 @@ public:
   }
 };
 
+// Signal handler
+DirectoryProcessor *globalProcessor = nullptr;
+void signalHandler(int signum) {
+  if (globalProcessor) {
+      std::cout << "\nInterrupt received, stopping...\n";
+      globalProcessor->stop();
+  }
+}
+
 int main(int argc, char *argv[]) {
   if (argc < 2) {
     std::cerr
@@ -236,11 +245,10 @@ int main(int argc, char *argv[]) {
     }
 
     DirectoryProcessor processor(std::move(config));
+    globalProcessor = &processor;
 
-    std::signal(SIGINT, [](int) {
-      std::cout << "\nInterrupt received, stopping...\n";
-      exit(0);
-    });
+    // Register signal handler
+    std::signal(SIGINT, signalHandler);
 
     return processor.process() ? 0 : 1;
 
