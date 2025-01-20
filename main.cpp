@@ -6,6 +6,7 @@
 #include <fstream>
 #include <iostream>
 #include <mutex>
+#include <regex> // Include for regex support
 #include <span>
 #include <sstream>
 #include <string>
@@ -23,7 +24,8 @@ public:
     std::vector<std::string> fileExtensions;
     bool ignoreDotFolders = true;
     std::vector<std::string> ignoredFolders;
-    std::vector<std::string> ignoredFiles; // Added to ignore specific files
+    std::vector<std::string> ignoredFiles;
+    std::vector<std::string> regexFilters;
   };
 
 private:
@@ -133,6 +135,25 @@ private:
                      path.filename().string()) != config.ignoredFiles.end();
   }
 
+  // Function to check if a file matches any of the regex filters
+  bool matchesRegexFilters(const fs::path &path) const {
+    if (config.regexFilters.empty())
+      return false;
+
+    const std::string filename = path.filename().string();
+    for (const auto regexStr : config.regexFilters) {
+      try {
+        std::regex regex(regexStr);
+        if (std::regex_search(filename, regex)) {
+          return true;
+        }
+      } catch (const std::regex_error &e) {
+        logError(std::format("Invalid regex: {}: {}", regexStr, e.what()));
+      }
+    }
+    return false;
+  }
+
   void printToConsole(const std::string &message) const {
     std::lock_guard<std::mutex> lock(consoleMutex);
     std::cout << message;
@@ -157,7 +178,8 @@ private:
             continue;
           }
           if (fs::is_regular_file(entry) && isFileExtensionAllowed(entry) &&
-              !shouldIgnoreFile(entry.path())) {
+              !shouldIgnoreFile(entry.path()) &&
+              !matchesRegexFilters(entry.path())) {
             files.push_back(entry.path());
           }
         }
@@ -168,7 +190,8 @@ private:
           if (shouldStop)
             break;
           if (fs::is_regular_file(entry) && isFileExtensionAllowed(entry) &&
-              !shouldIgnoreFile(entry.path())) {
+              !shouldIgnoreFile(entry.path()) &&
+              !matchesRegexFilters(entry.path())) { // Added regex filtering
             files.push_back(entry.path());
           }
         }
@@ -253,8 +276,9 @@ int main(int argc, char *argv[]) {
            "(can be used multiple times)\n"
         << "  -d, --dot-folders      Include folders starting with a dot\n"
         << "  -i, --ignore <item>    Ignore specific folder or file (can be "
-           "used "
-           "multiple times)\n";
+           "used multiple times)\n"
+        << "  -r, --regex <pattern>  Exclude files matching the regex pattern "
+           "(can be used multiple times)\n";
     return 1;
   }
 
@@ -284,6 +308,8 @@ int main(int argc, char *argv[]) {
           std::cerr << "Warning: Ignored item '" << itemPath.string()
                     << "' is neither a file nor a directory.\n";
         }
+      } else if ((arg == "-r" || arg == "--regex") && i + 1 < argc) {
+        config.regexFilters.push_back(argv[++i]);
       } else {
         std::cerr << "Invalid option: " << arg << "\n";
         return 1;
