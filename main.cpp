@@ -182,7 +182,7 @@ public:
 
     auto files = collectFiles();
     if (files.empty()) {
-      std::cout << "No matching files found in: " << config.dirPath << '\n';
+      printToConsole(std::format("No matching files found in: {}\n", config.dirPath.string()));
       return true;
     }
 
