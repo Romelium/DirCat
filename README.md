@@ -71,7 +71,7 @@ Process only files with extensions `cpp`, `h`, and `hpp`:
 
 Files are output in the following format:
 
-````
+````md
 ### File: filename.ext
 ```ext
 [file contents]
@@ -130,7 +130,7 @@ To build DirCat, you will need to have CMake and a C++20 compatible compiler ins
 
 ## Implementation Details
 
-- Uses modern C++ features including filesystem, threading, atomic operations, and regular expressions.        
+- Uses modern C++ features including filesystem, threading, atomic operations, and regular expressions.
 - Limits maximum thread count to 8 or hardware concurrency, whichever is lower.
 - Processes files in chunks for memory efficiency.
 - Maintains consistent output ordering regardless of thread execution order.
