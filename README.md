@@ -2,57 +2,6 @@
 
 DirCat is a high-performance C++ utility that concatenates and displays the contents of files in a directory, similar to the Unix `cat` command but for entire directories. It supports multi-threaded processing, recursive directory traversal, and filtering options.
 
-## Features
-
-- Multi-threaded file processing for improved performance
-- Recursive directory traversal (optional)
-- File extension filtering
-- Maximum file size limiting
-- Ignore specific folders
-- Ignore specific files
-- Regular expression filtering for excluding files
-- Formatted output with file names and syntax highlighting markers
-- Graceful interrupt handling
-- Memory-efficient streaming of large files
-
-## Requirements
-
-- C++20 compatible compiler
-- CMake 3.10 or higher
-- Standard C++ libraries
-
-## Building
-
-To build DirCat, you will need to have CMake and a C++20 compatible compiler installed on your system. Follow these steps to build the project:
-
-1. Clone the repository:
-
-   ```bash
-   git clone https://github.com/your-username/dircat.git
-   cd dircat
-   ```
-
-2. Create a build directory and navigate into it:
-
-   ```bash
-   mkdir build
-   cd build
-   ```
-
-3. Run CMake to configure the project:
-
-   ```bash
-   cmake .. -DCMAKE_BUILD_TYPE=Release
-   ```
-
-4. Build the project:
-
-   ```bash
-   cmake --build . --config Release
-   ```
-
-   This will create the `dircat` executable in the `build` directory.
-
 ## Usage
 
 ```bash
@@ -127,6 +76,57 @@ Files are output in the following format:
 ```ext
 [file contents]
 ````
+
+## Features
+
+- Multi-threaded file processing for improved performance
+- Recursive directory traversal (optional)
+- File extension filtering
+- Maximum file size limiting
+- Ignore specific folders
+- Ignore specific files
+- Regular expression filtering for excluding files
+- Formatted output with file names and syntax highlighting markers
+- Graceful interrupt handling
+- Memory-efficient streaming of large files
+
+## Requirements
+
+- C++20 compatible compiler
+- CMake 3.10 or higher
+- Standard C++ libraries
+
+## Building
+
+To build DirCat, you will need to have CMake and a C++20 compatible compiler installed on your system. Follow these steps to build the project:
+
+1. Clone the repository:
+
+   ```bash
+   git clone https://github.com/your-username/dircat.git
+   cd dircat
+   ```
+
+2. Create a build directory and navigate into it:
+
+   ```bash
+   mkdir build
+   cd build
+   ```
+
+3. Run CMake to configure the project:
+
+   ```bash
+   cmake .. -DCMAKE_BUILD_TYPE=Release
+   ```
+
+4. Build the project:
+
+   ```bash
+   cmake --build . --config Release
+   ```
+
+   This will create the `dircat` executable in the `build` directory.
 
 ## Implementation Details
 
