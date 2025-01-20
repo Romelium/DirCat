@@ -63,10 +63,10 @@ To build DirCat, you will need to have CMake and a C++20 compatible compiler ins
 
 - `-m, --max-size <bytes>`: Maximum file size in bytes (no limit by default)
 - `-n, --no-recursive`: Disable recursive directory search
-- `-e, --ext <ext>`: Process only files with the specified extension (can be used multiple times)
+- `-e, --ext <ext>`: Process only files with the specified extension (can be used multiple times and grouped)
 - `-d, --dot-folders`: Include folders starting with a dot (ignored by default)
-- `-i, --ignore <item>`: Ignore specific folder or file (can be used multiple times)
-- `-r, --regex <pattern>`: Exclude files matching the regex pattern (can be used multiple times)
+- `-i, --ignore <item>`: Ignore specific folder or file (can be used multiple times **and grouped**)
+- `-r, --regex <pattern>`: Exclude files matching the regex pattern (can be used multiple times and grouped)
 
 ### Examples
 
@@ -91,7 +91,7 @@ Process files in the current directory without recursion:
 Ignore `build` folder and `temp.txt` file:
 
 ```bash
-./dircat . --ignore build --ignore temp.txt
+./dircat . --ignore build temp.txt
 ```
 
 Include folders starting with a dot:
@@ -103,13 +103,19 @@ Include folders starting with a dot:
 Exclude all files ending with `.tmp` or `.log`:
 
 ```bash
-./dircat . -r "\.tmp$" -r "\.log$"
+./dircat . -r "\.tmp$" "\.log$"
 ```
 
 Exclude files containing the word "backup":
 
 ```bash
-./dircat . -r "backup"
+./dircat . -r backup
+```
+
+Process only files with extensions `cpp`, `h`, and `hpp`:
+
+```bash
+./dircat . -e cpp h hpp
 ```
 
 ## Output Format
@@ -124,7 +130,7 @@ Files are output in the following format:
 
 ## Implementation Details
 
-- Uses modern C++ features including filesystem, threading, atomic operations, and regular expressions.
+- Uses modern C++ features including filesystem, threading, atomic operations, and regular expressions.        
 - Limits maximum thread count to 8 or hardware concurrency, whichever is lower.
 - Processes files in chunks for memory efficiency.
 - Maintains consistent output ordering regardless of thread execution order.
