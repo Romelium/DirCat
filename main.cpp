@@ -224,7 +224,7 @@ int main(int argc, char *argv[]) {
         << "Options:\n"
         << "  -m, --max-size <MB>    Maximum file size in MB (default: 10)\n"
         << "  -n, --no-recursive     Disable recursive search\n"
-        << "  -e, --ext <ext>        Process only files with given extension\n";
+        << "  -e, --ext <ext>        Process only files with given extension (can be used multiple times)\n";
     return 1;
   }
 
