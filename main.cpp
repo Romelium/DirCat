@@ -241,6 +241,9 @@ int main(int argc, char *argv[]) {
         config.recursiveSearch = false;
       } else if ((arg == "-e" || arg == "--ext") && i + 1 < argc) {
         config.fileExtensions.push_back(argv[++i]);
+      } else {
+        std::cerr << "Invalid option: " << arg << "\n";
+        return 1;
       }
     }
 
