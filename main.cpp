@@ -19,7 +19,7 @@ class DirectoryProcessor {
 public:
   struct Config {
     fs::path dirPath;
-    size_t maxFileSizeMB = 10;
+    unsigned long long maxFileSizeB = 0; // Default: no limit
     bool recursiveSearch = true;
     std::vector<std::string> fileExtensions;
     bool ignoreDotFolders = true;
@@ -90,7 +90,9 @@ private:
 
     bool process() {
       try {
-        if (!processor.isFileSizeValid(path) || !readFile()) {
+        if (!processor.isFileSizeValid(path))
+          return false;
+        if (!readFile()) {
           processor.logError("Failed to process: " + path.string());
           return false;
         }
@@ -106,7 +108,8 @@ private:
 
   bool isFileSizeValid(const fs::path &path) const {
     try {
-      return fs::file_size(path) <= (config.maxFileSizeMB * 1024 * 1024);
+      return config.maxFileSizeB == 0 ||
+             fs::file_size(path) <= config.maxFileSizeB;
     } catch (const fs::filesystem_error &) {
       return false;
     }
@@ -270,7 +273,8 @@ int main(int argc, char *argv[]) {
     std::cerr
         << "Usage: " << argv[0] << " <directory_path> [options]\n"
         << "Options:\n"
-        << "  -m, --max-size <MB>    Maximum file size in MB (default: 10)\n"
+        << "  -m, --max-size <bytes>  Maximum file size in bytes (default: no "
+           "limit)\n"
         << "  -n, --no-recursive     Disable recursive search\n"
         << "  -e, --ext <ext>        Process only files with given extension "
            "(can be used multiple times)\n"
@@ -290,7 +294,7 @@ int main(int argc, char *argv[]) {
     for (int i = 2; i < argc; ++i) {
       std::string_view arg = argv[i];
       if ((arg == "-m" || arg == "--max-size") && i + 1 < argc) {
-        config.maxFileSizeMB = std::stoull(argv[++i]);
+        config.maxFileSizeB = std::stoll(argv[++i]);
       } else if (arg == "-n" || arg == "--no-recursive") {
         config.recursiveSearch = false;
       } else if ((arg == "-e" || arg == "--ext") && i + 1 < argc) {
