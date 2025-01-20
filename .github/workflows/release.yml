@@ -1,0 +1,96 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate Changelog
+        id: changelog
+        shell: bash
+        run: |
+          changelog=$(git log $(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD)..HEAD --pretty=format:"* %s%n")
+          echo "CHANGELOG<<CHANGELOGEOF" >> $GITHUB_OUTPUT
+          echo "$changelog" >> $GITHUB_OUTPUT
+          echo "CHANGELOGEOF" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref_name }}
+          body: |
+            ## Changes in this Release
+            
+            ${{ steps.changelog.outputs.CHANGELOG }}
+            
+            ## Installation
+            
+            Download the appropriate binary for your platform:
+            - Windows: `dircat-windows.exe`
+            - Linux: `dircat-linux`
+            - macOS: `dircat-macos`
+          draft: false
+          prerelease: false
+
+  build-and-upload:
+    needs: create-release
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: dircat-linux
+            cmake_generator: "Unix Makefiles"
+          - os: windows-latest
+            artifact_name: dircat-windows.exe
+            cmake_generator: "Visual Studio 17 2022"
+          - os: macos-latest
+            artifact_name: dircat-macos
+            cmake_generator: "Unix Makefiles"
+    
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Configure CMake
+      run: >
+        cmake -B ${{github.workspace}}/build 
+        -DCMAKE_BUILD_TYPE=Release
+        -G "${{matrix.cmake_generator}}"
+
+    - name: Build
+      run: cmake --build ${{github.workspace}}/build --config Release
+
+    - name: Prepare Binary
+      shell: bash
+      run: |
+        if [ "${{ runner.os }}" == "Windows" ]; then
+          cp build/Release/dircat.exe ${{ matrix.artifact_name }}
+        else
+          cp build/dircat ${{ matrix.artifact_name }}
+          chmod +x ${{ matrix.artifact_name }}
+        fi
+
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: ${{ matrix.artifact_name }}
+        asset_name: ${{ matrix.artifact_name }}
+        asset_content_type: application/octet-stream
