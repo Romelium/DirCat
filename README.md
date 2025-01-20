@@ -10,6 +10,7 @@ DirCat is a high-performance C++ utility that concatenates and displays the cont
 - Maximum file size limiting
 - Ignore specific folders
 - Ignore specific files
+- Regular expression filtering for excluding files
 - Formatted output with file names and syntax highlighting markers
 - Graceful interrupt handling
 - Memory-efficient streaming of large files
@@ -65,6 +66,7 @@ To build DirCat, you will need to have CMake and a C++20 compatible compiler ins
 - `-e, --ext <ext>`: Process only files with the specified extension (can be used multiple times)
 - `-d, --dot-folders`: Include folders starting with a dot (ignored by default)
 - `-i, --ignore <item>`: Ignore specific folder or file (can be used multiple times)
+- `-r, --regex <pattern>`: Exclude files matching the regex pattern (can be used multiple times)
 
 ### Examples
 
@@ -98,6 +100,18 @@ Include folders starting with a dot:
 ./dircat . --dot-folders
 ```
 
+Exclude all files ending with `.tmp` or `.log`:
+
+```bash
+./dircat . -r "\.tmp$" -r "\.log$"
+```
+
+Exclude files containing the word "backup":
+
+```bash
+./dircat . -r "backup"
+```
+
 ## Output Format
 
 Files are output in the following format:
@@ -110,18 +124,19 @@ Files are output in the following format:
 
 ## Implementation Details
 
-- Uses modern C++ features including filesystem, threading, and atomic operations
-- Limits maximum thread count to 8 or hardware concurrency, whichever is lower
-- Processes files in chunks for memory efficiency
-- Maintains consistent output ordering regardless of thread execution order
-- Handles large files efficiently through buffered reading
+- Uses modern C++ features including filesystem, threading, atomic operations, and regular expressions.
+- Limits maximum thread count to 8 or hardware concurrency, whichever is lower.
+- Processes files in chunks for memory efficiency.
+- Maintains consistent output ordering regardless of thread execution order.
+- Handles large files efficiently through buffered reading.
 
 ## Error Handling
 
-- Graceful handling of permission denied errors
-- Skip files exceeding size limit
-- Thread-safe error logging
-- Signal handling for clean interruption
+- Graceful handling of permission denied errors.
+- Skips files exceeding size limit.
+- Thread-safe error logging.
+- Signal handling for clean interruption.
+- Reports invalid regular expressions.
 
 ## License
 
