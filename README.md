@@ -16,6 +16,7 @@ DirCat is a high-performance C++ utility that concatenates and displays the cont
 - `-d, --dot-folders`: Include folders starting with a dot (ignored by default)
 - `-i, --ignore <item>`: Ignore specific folder or file (can be used multiple times **and grouped**)
 - `-r, --regex <pattern>`: Exclude files matching the regex pattern (can be used multiple times and grouped)
+- `-c, --remove-comments`: Remove C++ style comments (`//` and `/* ... */`) from the output.
 
 ### Examples
 
@@ -67,6 +68,12 @@ Process only files with extensions `cpp`, `h`, and `hpp`:
 ./dircat . -e cpp h hpp
 ```
 
+Remove C++ comments from the output:
+
+```bash
+./dircat . -c
+```
+
 ## Output Format
 
 Files are output in the following format:
@@ -86,6 +93,7 @@ Files are output in the following format:
 - Ignore specific folders
 - Ignore specific files
 - Regular expression filtering for excluding files
+- Option to remove C++ style comments
 - Formatted output with file names and syntax highlighting markers
 - Graceful interrupt handling
 - Memory-efficient streaming of large files
@@ -135,6 +143,7 @@ To build DirCat, you will need to have CMake and a C++20 compatible compiler ins
 - Processes files in chunks for memory efficiency.
 - Maintains consistent output ordering regardless of thread execution order.
 - Handles large files efficiently through buffered reading.
+- Removes comments by tracking if the current character is within a string, character literal, single-line comment, or multi-line comment.
 
 ## Error Handling
 
