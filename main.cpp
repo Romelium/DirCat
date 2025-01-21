@@ -6,7 +6,7 @@
 #include <fstream>
 #include <iostream>
 #include <mutex>
-#include <regex> // Include for regex support
+#include <regex>
 #include <span>
 #include <sstream>
 #include <string>
@@ -26,6 +26,7 @@ public:
     std::vector<std::string> ignoredFolders;
     std::vector<std::string> ignoredFiles;
     std::vector<std::string> regexFilters;
+    bool removeComments = false;
   };
 
 private:
@@ -43,6 +44,68 @@ private:
     const fs::path &path;
     std::stringstream content;
 
+    std::string removeCppComments(const std::string &code) {
+      std::string result;
+      bool inString = false;
+      bool inChar = false;
+      bool inSingleLineComment = false;
+      bool inMultiLineComment = false;
+
+      for (size_t i = 0; i < code.size(); ++i) {
+        if (inString) {
+          if (code[i] == '\\' && i + 1 < code.size()) {
+            result += code[i];
+            result += code[++i];
+          } else {
+            if (code[i] == '"') {
+              inString = false;
+            }
+            result += code[i];
+          }
+        } else if (inChar) {
+          if (code[i] == '\\' && i + 1 < code.size()) {
+            result += code[i];
+            result += code[++i];
+          } else {
+            if (code[i] == '\'') {
+              inChar = false;
+            }
+            result += code[i];
+          }
+        } else if (inSingleLineComment) {
+          if (code[i] == '\n') {
+            inSingleLineComment = false;
+            result += code[i];
+          }
+        } else if (inMultiLineComment) {
+          if (code[i] == '*' && i + 1 < code.size() && code[i + 1] == '/') {
+            inMultiLineComment = false;
+            ++i;
+          }
+        } else {
+          if (code[i] == '"') {
+            inString = true;
+            result += code[i];
+          } else if (code[i] == '\'') {
+            inChar = true;
+            result += code[i];
+          } else if (code[i] == '/' && i + 1 < code.size() &&
+                     code[i + 1] == '/') {
+            inSingleLineComment = true;
+            ++i;
+          } else if (code[i] == '/' && i + 1 < code.size() &&
+                     code[i + 1] == '*') {
+            inMultiLineComment = true;
+            ++i;
+          } else {
+            result += code[i];
+          }
+        }
+      }
+
+      return result;
+    }
+
     bool readFile() {
       std::ifstream file(path, std::ios::binary);
       if (!file)
@@ -57,26 +120,25 @@ private:
       // Read file content in chunks to handle large files better
       constexpr size_t BUFFER_SIZE = 8192;
       char buffer[BUFFER_SIZE];
-      bool firstLine = true;
+      std::string fileContent;
 
       while (file.good() && !processor.shouldStop) {
         file.read(buffer, BUFFER_SIZE);
-        const std::string_view chunk(buffer, file.gcount());
+        fileContent.append(buffer, file.gcount());
+      }
 
-        size_t pos = 0, next;
-        while ((next = chunk.find('\n', pos)) != std::string::npos) {
-          if (!firstLine)
-            content << '\n';
-          content.write(chunk.data() + pos, next - pos);
-          firstLine = false;
-          pos = next + 1;
-        }
-        if (pos < chunk.size()) {
-          if (!firstLine)
-            content << '\n';
-          content.write(chunk.data() + pos, chunk.size() - pos);
-          firstLine = false;
-        }
+      if (processor.config.removeComments) {
+        fileContent = removeCppComments(fileContent);
+      }
+
+      size_t pos = 0, next;
+      while ((next = fileContent.find('\n', pos)) != std::string::npos) {
+        content.write(fileContent.data() + pos, next - pos);
+        content << '\n';
+        pos = next + 1;
+      }
+      if (pos < fileContent.size()) {
+        content.write(fileContent.data() + pos, fileContent.size() - pos);
       }
 
       content << "\n```\n";
@@ -282,7 +344,9 @@ int main(int argc, char *argv[]) {
         << "  -i, --ignore <item>    Ignore specific folder or file (can be "
            "used multiple times, grouped)\n"
         << "  -r, --regex <pattern>  Exclude files matching the regex pattern "
-           "(can be used multiple times, grouped)\n";
+           "(can be used multiple times, grouped)\n"
+        << "  -c, --remove-comments  Remove C++ style comments (// and /* */) "
+           "from code\n";
     return 1;
   }
 
@@ -320,6 +384,8 @@ int main(int argc, char *argv[]) {
         while (i + 1 < argc && argv[i + 1][0] != '-') {
           config.regexFilters.push_back(argv[++i]);
         }
+      } else if (arg == "-c" || arg == "--remove-comments") {
+        config.removeComments = true;
       } else {
         std::cerr << "Invalid option: " << arg << "\n";
         return 1;
