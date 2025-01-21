@@ -27,6 +27,7 @@ public:
     std::vector<std::string> ignoredFiles;
     std::vector<std::string> regexFilters;
     bool removeComments = false;
+    bool removeEmptyLines = false;
   };
 
 private:
@@ -131,14 +132,14 @@ private:
         fileContent = removeCppComments(fileContent);
       }
 
-      size_t pos = 0, next;
-      while ((next = fileContent.find('\n', pos)) != std::string::npos) {
-        content.write(fileContent.data() + pos, next - pos);
-        content << '\n';
-        pos = next + 1;
-      }
-      if (pos < fileContent.size()) {
-        content.write(fileContent.data() + pos, fileContent.size() - pos);
+      std::string line;
+      std::istringstream iss(fileContent);
+      while (std::getline(iss, line)) {
+        if (processor.config.removeEmptyLines &&
+            line.find_first_not_of(" \t") == std::string::npos) {
+          continue;
+        }
+        content << line << '\n';
       }
 
       content << "\n```\n";
@@ -346,7 +347,8 @@ int main(int argc, char *argv[]) {
         << "  -r, --regex <pattern>  Exclude files matching the regex pattern "
            "(can be used multiple times, grouped)\n"
         << "  -c, --remove-comments  Remove C++ style comments (// and /* */) "
-           "from code\n";
+           "from code\n"
+        << "  -l, --remove-empty-lines Remove empty lines from output\n";
     return 1;
   }
 
@@ -386,6 +388,8 @@ int main(int argc, char *argv[]) {
         }
       } else if (arg == "-c" || arg == "--remove-comments") {
         config.removeComments = true;
+      } else if (arg == "-l" || arg == "--remove-empty-lines") {
+        config.removeEmptyLines = true;
       } else {
         std::cerr << "Invalid option: " << arg << "\n";
         return 1;
