@@ -8,6 +8,8 @@ on:
 jobs:
   create-release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       upload_url: ${{ steps.create_release.outputs.upload_url }}
     steps:
@@ -19,7 +21,8 @@ jobs:
         id: changelog
         shell: bash
         run: |
-          changelog=$(git log $(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD)..HEAD --pretty=format:"* %s%n")
+          previous_tag=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD)
+          changelog=$(git log ${previous_tag}..HEAD --pretty=format:"* %s%n")
           echo "CHANGELOG<<CHANGELOGEOF" >> $GITHUB_OUTPUT
           echo "$changelog" >> $GITHUB_OUTPUT
           echo "CHANGELOGEOF" >> $GITHUB_OUTPUT
@@ -50,75 +53,90 @@ jobs:
 
   build-and-upload:
     needs: create-release
+    permissions:
+      contents: write
     strategy:
       matrix:
         include:
           - os: ubuntu-latest
             artifact_name: dircat-linux-x86_64
-            cmake_generator: "Unix Makefiles"
             target: x86_64-unknown-linux-gnu
           - os: ubuntu-latest
             artifact_name: dircat-linux-arm64
-            cmake_generator: "Unix Makefiles"
             target: aarch64-unknown-linux-gnu
           - os: windows-latest
             artifact_name: dircat-windows.exe
-            cmake_generator: "Visual Studio 17 2022"
             target: x86_64-pc-windows-msvc
           - os: macos-latest
             artifact_name: dircat-macos-x86_64
-            cmake_generator: "Unix Makefiles"
             target: x86_64-apple-darwin
           - os: macos-latest
             artifact_name: dircat-macos-arm64
-            cmake_generator: "Unix Makefiles"
             target: aarch64-apple-darwin
     
     runs-on: ${{ matrix.os }}
     
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Install ARM cross-compilation tools (Linux)
-      if: matrix.target == 'aarch64-unknown-linux-gnu'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+      - name: Set up CMake
+        uses: lukka/get-cmake@latest
 
-    - name: Install ARM cross-compilation tools (macOS)
-      if: matrix.target == 'aarch64-apple-darwin'
-      run: |
-        brew install arm64-apple-darwin-gcc
+      - name: Install ARM cross-compilation tools (Linux)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
-    - name: Configure CMake
-      run: >
-        cmake -B ${{github.workspace}}/build 
-        -DCMAKE_BUILD_TYPE=Release
-        -DCMAKE_SYSTEM_NAME=${{ matrix.target == 'aarch64-unknown-linux-gnu' && 'Linux' || matrix.target == 'aarch64-apple-darwin' && 'Darwin' || '' }}
-        -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.target == 'aarch64-unknown-linux-gnu' && 'aarch64' || matrix.target == 'aarch64-apple-darwin' && 'arm64' || '' }}
-        -DCMAKE_C_COMPILER=${{ matrix.target == 'aarch64-unknown-linux-gnu' && 'aarch64-linux-gnu-gcc' || matrix.target == 'aarch64-apple-darwin' && 'arm64-apple-darwin-gcc' || '' }}
-        -DCMAKE_CXX_COMPILER=${{ matrix.target == 'aarch64-unknown-linux-gnu' && 'aarch64-linux-gnu-g++' || matrix.target == 'aarch64-apple-darwin' && 'arm64-apple-darwin-g++' || '' }}
-        -G "${{matrix.cmake_generator}}"
+      - name: Configure CMake for Linux x86_64
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
-    - name: Build
-      run: cmake --build ${{github.workspace}}/build --config Release --target dircat
+      - name: Configure CMake for Linux ARM64
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          cmake -B build \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_SYSTEM_NAME=Linux \
+          -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+          -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
+          -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++
 
-    - name: Prepare Binary
-      shell: bash
-      run: |
-        if [ "${{ runner.os }}" == "Windows" ]; then
-          cp build/Release/dircat.exe ${{ matrix.artifact_name }}
-        else
-          cp build/dircat ${{ matrix.artifact_name }}
-          chmod +x ${{ matrix.artifact_name }}
-        fi
+      - name: Configure CMake for Windows
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
-    - name: Upload Release Asset
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ needs.create-release.outputs.upload_url }}
-        asset_path: ${{ matrix.artifact_name }}
-        asset_name: ${{ matrix.artifact_name }}
-        asset_content_type: application/octet-stream
+      - name: Configure CMake for macOS x86_64
+        if: matrix.target == 'x86_64-apple-darwin'
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Configure CMake for macOS ARM64
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: |
+          cmake -B build \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_SYSTEM_NAME=Darwin \
+          -DCMAKE_OSX_ARCHITECTURES=arm64
+
+      - name: Build
+        run: cmake --build build --config Release --target dircat
+
+      - name: Prepare Binary
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" == "Windows" ]; then
+            cp build/Release/dircat.exe ${{ matrix.artifact_name }}
+          else
+            cp build/dircat ${{ matrix.artifact_name }}
+            chmod +x ${{ matrix.artifact_name }}
+          fi
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ${{ matrix.artifact_name }}
+          asset_name: ${{ matrix.artifact_name }}
+          asset_content_type: application/octet-stream
