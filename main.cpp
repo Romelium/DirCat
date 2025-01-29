@@ -33,6 +33,7 @@ public:
     bool showRelativePath = false;
     bool ordered = false;
     std::vector<std::string> lastFiles; // Files to be processed last
+    bool markdownlintFixes = false;
   };
 
 private:
@@ -118,12 +119,19 @@ private:
       if (!file)
         return false;
 
-      content << "\n### File: ";
+      if (processor.config.markdownlintFixes)
+        content << "\n## File: ";
+      else
+        content << "\n### File: ";
       if (processor.config.showRelativePath) {
         content << fs::relative(path, processor.config.dirPath).string();
       } else {
         content << path.filename().string();
       }
+
+      if (processor.config.markdownlintFixes)
+        content << '\n';
+
       content << "\n```";
       if (path.has_extension()) {
         content << path.extension().string().substr(1);
@@ -385,6 +393,9 @@ public:
     const size_t filesPerThread =
         (normalFiles.size() + threadCount - 1) / threadCount;
 
+    if (config.markdownlintFixes)
+      printToConsole("#\n");
+
     for (size_t i = 0;
          i < threadCount && i * filesPerThread < normalFiles.size(); ++i) {
       const size_t start = i * filesPerThread;
@@ -466,7 +477,8 @@ int main(int argc, char *argv[]) {
         << "  -o, --ordered          Output files in the order they were "
            "found\n"
         << "  -z, --last <file>      Process specific file last (can be used "
-           "multiple times, order will be kept)\n";
+           "multiple times, order will be kept)\n"
+        << "  -w, --markdownlint-fixes Enable fixes for Markdown linting\n";
     return 1;
   }
 
@@ -516,6 +528,8 @@ int main(int argc, char *argv[]) {
         while (i + 1 < argc && argv[i + 1][0] != '-') {
           config.lastFiles.push_back(argv[++i]);
         }
+      } else if (arg == "-w" || arg == "--markdownlint-fixes") {
+        config.markdownlintFixes = true;
       } else {
         std::cerr << "Invalid option: " << arg << "\n";
         return 1;
