@@ -19,6 +19,9 @@ DirCat is a high-performance C++ utility that concatenates and displays the cont
 - `-c, --remove-comments`: Remove C++ style comments (`//` and `/* ... */`) from the output.
 - `-l, --remove-empty-lines`: Remove empty lines from the output
 - `-p, --relative-path`: Show relative path in file headers instead of filename
+- `-o, --ordered`: Output files in the order they were found (by default, multi-threading may cause files to be output in a different order)
+- `-z, --last <file>`:  Process specific file last (can be used multiple times, order will be kept)
+- `-w, --markdownlint-fixes`: Apply basic Markdown linting fixes to the output (compatible with markdownlint format)
 
 ### Examples
 
@@ -94,6 +97,36 @@ Show relative paths in the output:
 ./dircat . -p
 ```
 
+Output files in the order they are found:
+
+```bash
+./dircat . -o
+```
+
+Process `main.cpp` and `utils.h` last, in that order:
+
+```bash
+./dircat . -z main.cpp -z utils.h
+```
+
+Process all files, output them in order, and process `notes.txt` last:
+
+```bash
+./dircat . -o -z notes.txt
+```
+
+Apply Markdown linting fixes:
+
+```bash
+./dircat . -w
+```
+
+Apply Markdown linting fixes, remove comments, and order output:
+
+```bash
+./dircat . -w -c -o
+```
+
 ## Output Format
 
 Files are output in the following format:
@@ -112,6 +145,20 @@ Or, if `-p` is used:
 [file contents]
 ````
 
+If `-w` (markdownlint fixes) is used, the output format changes slightly:
+
+- The `###` is reduced to `##`
+- There will be empty line after header
+- There will be top-level `#` at the beginning
+
+````md
+#
+## File: filename.ext
+
+```ext
+[file contents]
+````
+
 ## Features
 
 - Multi-threaded file processing for improved performance
@@ -124,6 +171,9 @@ Or, if `-p` is used:
 - Option to remove C++ style comments
 - Option to remove empty lines
 - Option to show relative paths
+- Option to enforce output order
+- Option to process specific files last, in specified order
+- Option to apply basic Markdown linting fixes
 - Formatted output with file names and syntax highlighting markers
 - Graceful interrupt handling
 - Memory-efficient streaming of large files
@@ -171,10 +221,11 @@ To build DirCat, you will need to have CMake and a C++20 compatible compiler ins
 - Uses modern C++ features including filesystem, threading, atomic operations, and regular expressions.
 - Limits maximum thread count to 8 or hardware concurrency, whichever is lower.
 - Processes files in chunks for memory efficiency.
-- Maintains consistent output ordering regardless of thread execution order.
+- Optionally maintains consistent output ordering using sorting after multi-threaded processing.
 - Handles large files efficiently through buffered reading.
 - Removes comments by tracking if the current character is within a string, character literal, single-line comment, or multi-line comment.
 - Removes empty lines by checking if a line contains only whitespace characters.
+- Supports processing specific files last in the user-specified order, even when general ordering is not enabled.
 
 ## Error Handling
 
@@ -183,6 +234,7 @@ To build DirCat, you will need to have CMake and a C++20 compatible compiler ins
 - Thread-safe error logging.
 - Signal handling for clean interruption.
 - Reports invalid regular expressions.
+- Robust thread synchronization to prevent crashes with the ordered option.
 
 ## License
 
