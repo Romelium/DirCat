@@ -41,6 +41,7 @@ private:
   std::atomic<size_t> processedFiles{0};
   std::atomic<size_t> totalBytes{0};
   mutable std::mutex consoleMutex;
+  mutable std::mutex orderedResultsMutex;
   const std::chrono::steady_clock::time_point startTime{
       std::chrono::steady_clock::now()};
   const unsigned int threadCount;
@@ -320,12 +321,18 @@ private:
     for (const auto &path : chunk) {
       if (shouldStop)
         break;
-      FileProcessor processor(*this, path);
-      if (processor.process()) {
-        if (config.ordered) {
-          results.emplace_back(path, processor.getContent().str());
+      try {
+        FileProcessor processor(*this, path);
+        if (processor.process()) {
+          if (config.ordered) {
+            // Lock mutex before modifying orderedResults
+            std::lock_guard<std::mutex> lock(orderedResultsMutex);
+            results.emplace_back(path, processor.getContent().str());
+          }
+          ++processedFiles;
         }
-        ++processedFiles;
+      } catch (const std::exception &e) {
+        logError(std::format("Exception in processFileChunk: {}", e.what()));
       }
     }
   }
@@ -334,10 +341,14 @@ private:
     for (const auto &path : lastFiles) {
       if (shouldStop)
         break;
-      FileProcessor processor(*this, path);
-      if (processor.process()) {
-        printToConsole(processor.getContent().str());
-        ++processedFiles;
+      try {
+        FileProcessor processor(*this, path);
+        if (processor.process()) {
+          printToConsole(processor.getContent().str());
+          ++processedFiles;
+        }
+      } catch (const std::exception &e) {
+        logError(std::format("Exception in processLastFiles: {}", e.what()));
       }
     }
   }
@@ -380,9 +391,13 @@ public:
       const size_t end = std::min(start + filesPerThread, normalFiles.size());
 
       threads.emplace_back([this, &normalFiles, start, end, &orderedResults] {
-        processFileChunk(
-            std::span(normalFiles.begin() + start, normalFiles.begin() + end),
-            orderedResults);
+        try {
+          processFileChunk(
+              std::span(normalFiles.begin() + start, normalFiles.begin() + end),
+              orderedResults);
+        } catch (const std::exception &e) {
+          logError(std::format("Exception in thread: {}", e.what()));
+        }
       });
     }
 
@@ -392,15 +407,23 @@ public:
 
     // Print ordered results for normal files (if -o is enabled)
     if (config.ordered) {
-      std::sort(
-          orderedResults.begin(), orderedResults.end(),
-          [&normalFiles](const auto &a, const auto &b) {
-            return std::find(normalFiles.begin(), normalFiles.end(), a.first) <
-                   std::find(normalFiles.begin(), normalFiles.end(), b.first);
-          });
+      try {
+        // Lock mutex before accessing orderedResults
+        std::lock_guard<std::mutex> lock(orderedResultsMutex);
+        std::sort(orderedResults.begin(), orderedResults.end(),
+                  [&normalFiles](const auto &a, const auto &b) {
+                    return std::find(normalFiles.begin(), normalFiles.end(),
+                                     a.first) < std::find(normalFiles.begin(),
+                                                          normalFiles.end(),
+                                                          b.first);
+                  });
 
-      for (const auto &result : orderedResults) {
-        printToConsole(result.second);
+        for (const auto &result : orderedResults) {
+          printToConsole(result.second);
+        }
+      } catch (const std::exception &e) {
+        logError(std::format(
+            "Exception while sorting/printing ordered results: {}", e.what()));
       }
     }
 
