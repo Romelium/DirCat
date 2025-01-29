@@ -135,6 +135,10 @@ private:
       std::string line;
       std::istringstream iss(fileContent);
       while (std::getline(iss, line)) {
+        // Remove trailing '\r' to handle CRLF line endings
+        if (!line.empty() && line.back() == '\r') {
+          line.pop_back();
+        }
         if (processor.config.removeEmptyLines &&
             line.find_first_not_of(" \t\r\n") == std::string::npos) {
           continue;
