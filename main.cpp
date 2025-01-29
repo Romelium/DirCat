@@ -136,7 +136,7 @@ private:
       std::istringstream iss(fileContent);
       while (std::getline(iss, line)) {
         if (processor.config.removeEmptyLines &&
-            line.find_first_not_of(" \t") == std::string::npos) {
+            line.find_first_not_of(" \t\r\n") == std::string::npos) {
           continue;
         }
         content << line << '\n';
