@@ -18,6 +18,7 @@ DirCat is a high-performance C++ utility that concatenates and displays the cont
 - `-r, --regex <pattern>`: Exclude files matching the regex pattern (can be used multiple times and grouped)
 - `-c, --remove-comments`: Remove C++ style comments (`//` and `/* ... */`) from the output.
 - `-l, --remove-empty-lines`: Remove empty lines from the output
+- `-p, --relative-path`: Show relative path in file headers instead of filename
 
 ### Examples
 
@@ -87,12 +88,26 @@ Remove C++ comments and empty lines from the output:
 ./dircat . -c -l
 ```
 
+Show relative paths in the output:
+
+```bash
+./dircat . -p
+```
+
 ## Output Format
 
 Files are output in the following format:
 
 ````md
 ### File: filename.ext
+```ext
+[file contents]
+````
+
+Or, if `-p` is used:
+
+````md
+### File: relative/path/to/filename.ext
 ```ext
 [file contents]
 ````
@@ -108,6 +123,7 @@ Files are output in the following format:
 - Regular expression filtering for excluding files
 - Option to remove C++ style comments
 - Option to remove empty lines
+- Option to show relative paths
 - Formatted output with file names and syntax highlighting markers
 - Graceful interrupt handling
 - Memory-efficient streaming of large files
