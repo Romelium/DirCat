@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -29,6 +30,7 @@ public:
     bool removeComments = false;
     bool removeEmptyLines = false;
     bool showRelativePath = false;
+    bool ordered = false;
   };
 
 private:
@@ -170,7 +172,9 @@ private:
           processor.logError("Failed to process: " + path.string());
           return false;
         }
-        processor.printToConsole(content.str());
+        if (!processor.config.ordered) {
+          processor.printToConsole(content.str());
+        }
         return true;
       } catch (const std::exception &e) {
         processor.logError(
@@ -178,6 +182,8 @@ private:
         return false;
       }
     }
+
+    const std::stringstream &getContent() const { return content; }
   };
 
   bool isFileSizeValid(const fs::path &path) const {
@@ -280,11 +286,17 @@ private:
     return files;
   }
 
-  void processFileChunk(std::span<const fs::path> chunk) {
+  void
+  processFileChunk(std::span<const fs::path> chunk,
+                   std::vector<std::pair<fs::path, std::string>> &results) {
     for (const auto &path : chunk) {
       if (shouldStop)
         break;
-      if (FileProcessor(*this, path).process()) {
+      FileProcessor processor(*this, path);
+      if (processor.process()) {
+        if (config.ordered) {
+          results.emplace_back(path, processor.getContent().str());
+        }
         ++processedFiles;
       }
     }
@@ -311,6 +323,11 @@ public:
       return true;
     }
 
+    std::vector<std::pair<fs::path, std::string>> orderedResults;
+    if (config.ordered) {
+      orderedResults.reserve(files.size());
+    }
+
     std::vector<std::thread> threads;
     const size_t filesPerThread =
         (files.size() + threadCount - 1) / threadCount;
@@ -320,8 +337,9 @@ public:
       const size_t start = i * filesPerThread;
       const size_t end = std::min(start + filesPerThread, files.size());
 
-      threads.emplace_back([this, &files, start, end] {
-        processFileChunk(std::span(files.begin() + start, files.begin() + end));
+      threads.emplace_back([this, &files, start, end, &orderedResults] {
+        processFileChunk(std::span(files.begin() + start, files.begin() + end),
+                         orderedResults);
       });
     }
 
@@ -329,6 +347,19 @@ public:
       thread.join();
     }
 
+    if (config.ordered) {
+      // Sort the results based on the original order in 'files'
+      std::sort(orderedResults.begin(), orderedResults.end(),
+                [&files](const auto &a, const auto &b) {
+                  return std::find(files.begin(), files.end(), a.first) <
+                         std::find(files.begin(), files.end(), b.first);
+                });
+
+      // Print the ordered results
+      for (const auto &result : orderedResults) {
+        printToConsole(result.second);
+      }
+    }
     return true;
   }
 };
@@ -361,7 +392,9 @@ int main(int argc, char *argv[]) {
            "from code\n"
         << "  -l, --remove-empty-lines Remove empty lines from output\n"
         << "  -p, --relative-path    Show relative path in file headers "
-           "instead of filename\n";
+           "instead of filename\n"
+        << "  -o, --ordered          Output files in the order they were "
+           "found\n";
     return 1;
   }
 
@@ -405,6 +438,8 @@ int main(int argc, char *argv[]) {
         config.removeEmptyLines = true;
       } else if (arg == "-p" || arg == "--relative-path") {
         config.showRelativePath = true;
+      } else if (arg == "-o" || arg == "--ordered") {
+        config.ordered = true;
       } else {
         std::cerr << "Invalid option: " << arg << "\n";
         return 1;
