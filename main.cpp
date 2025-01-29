@@ -28,6 +28,7 @@ public:
     std::vector<std::string> regexFilters;
     bool removeComments = false;
     bool removeEmptyLines = false;
+    bool showRelativePath = false;
   };
 
 private:
@@ -112,7 +113,13 @@ private:
       if (!file)
         return false;
 
-      content << "\n### File: " << path.filename().string() << "\n```";
+      content << "\n### File: ";
+      if (processor.config.showRelativePath) {
+        content << fs::relative(path, processor.config.dirPath).string();
+      } else {
+        content << path.filename().string();
+      }
+      content << "\n```";
       if (path.has_extension()) {
         content << path.extension().string().substr(1);
       }
@@ -352,7 +359,9 @@ int main(int argc, char *argv[]) {
            "(can be used multiple times, grouped)\n"
         << "  -c, --remove-comments  Remove C++ style comments (// and /* */) "
            "from code\n"
-        << "  -l, --remove-empty-lines Remove empty lines from output\n";
+        << "  -l, --remove-empty-lines Remove empty lines from output\n"
+        << "  -p, --relative-path    Show relative path in file headers "
+           "instead of filename\n";
     return 1;
   }
 
@@ -394,6 +403,8 @@ int main(int argc, char *argv[]) {
         config.removeComments = true;
       } else if (arg == "-l" || arg == "--remove-empty-lines") {
         config.removeEmptyLines = true;
+      } else if (arg == "-p" || arg == "--relative-path") {
+        config.showRelativePath = true;
       } else {
         std::cerr << "Invalid option: " << arg << "\n";
         return 1;
