@@ -12,6 +12,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -31,6 +32,7 @@ public:
     bool removeEmptyLines = false;
     bool showRelativePath = false;
     bool ordered = false;
+    std::vector<std::string> lastFiles; // Files to be processed last
   };
 
 private:
@@ -247,8 +249,11 @@ private:
     std::cerr << "ERROR: " << message << '\n';
   }
 
-  std::vector<fs::path> collectFiles() const {
-    std::vector<fs::path> files;
+  std::vector<fs::path> collectFiles(std::vector<fs::path> &lastFiles) const {
+    std::vector<fs::path> normalFiles;
+    std::unordered_set<std::string> lastFilesSet(config.lastFiles.begin(),
+                                                 config.lastFiles.end());
+
     try {
       auto iterator = fs::recursive_directory_iterator(
           config.dirPath, fs::directory_options::skip_permission_denied);
@@ -263,7 +268,11 @@ private:
           if (fs::is_regular_file(entry) && isFileExtensionAllowed(entry) &&
               !shouldIgnoreFile(entry.path()) &&
               !matchesRegexFilters(entry.path())) {
-            files.push_back(entry.path());
+            if (lastFilesSet.count(entry.path().filename().string())) {
+              lastFiles.push_back(entry.path());
+            } else {
+              normalFiles.push_back(entry.path());
+            }
           }
         }
       } else {
@@ -274,16 +283,35 @@ private:
             break;
           if (fs::is_regular_file(entry) && isFileExtensionAllowed(entry) &&
               !shouldIgnoreFile(entry.path()) &&
-              !matchesRegexFilters(entry.path())) { // Added regex filtering
-            files.push_back(entry.path());
+              !matchesRegexFilters(entry.path())) {
+            if (lastFilesSet.count(entry.path().filename().string())) {
+              lastFiles.push_back(entry.path());
+            } else {
+              normalFiles.push_back(entry.path());
+            }
           }
         }
       }
-      std::sort(files.begin(), files.end());
+      std::sort(normalFiles.begin(), normalFiles.end());
+
+      // Sort and remove duplicates from lastFiles based on the order in
+      // config.lastFiles
+      std::vector<fs::path> sortedLastFiles;
+      for (const auto &filename : config.lastFiles) {
+        auto it = std::find_if(lastFiles.begin(), lastFiles.end(),
+                               [&filename](const fs::path &path) {
+                                 return path.filename().string() == filename;
+                               });
+        if (it != lastFiles.end()) {
+          sortedLastFiles.push_back(*it);
+        }
+      }
+      lastFiles = sortedLastFiles;
+
     } catch (const fs::filesystem_error &e) {
       logError("Error scanning directory: " + std::string(e.what()));
     }
-    return files;
+    return normalFiles;
   }
 
   void
@@ -302,12 +330,23 @@ private:
     }
   }
 
+  void processLastFiles(const std::vector<fs::path> &lastFiles) {
+    for (const auto &path : lastFiles) {
+      if (shouldStop)
+        break;
+      FileProcessor processor(*this, path);
+      if (processor.process()) {
+        printToConsole(processor.getContent().str());
+        ++processedFiles;
+      }
+    }
+  }
+
 public:
   DirectoryProcessor(Config cfg)
       : config(std::move(cfg)),
         threadCount(std::min(std::thread::hardware_concurrency(),
-                             static_cast<unsigned int>(8))) {
-  } // Limit max threads
+                             static_cast<unsigned int>(8))) {}
   void stop() { shouldStop = true; }
 
   bool process() {
@@ -316,30 +355,34 @@ public:
       return false;
     }
 
-    auto files = collectFiles();
-    if (files.empty()) {
+    std::vector<fs::path> lastFiles;
+    auto normalFiles = collectFiles(lastFiles);
+
+    if (normalFiles.empty() && lastFiles.empty()) {
       printToConsole(std::format("No matching files found in: {}\n",
                                  config.dirPath.string()));
       return true;
     }
 
+    // Process normal files
     std::vector<std::pair<fs::path, std::string>> orderedResults;
     if (config.ordered) {
-      orderedResults.reserve(files.size());
+      orderedResults.reserve(normalFiles.size());
     }
 
     std::vector<std::thread> threads;
     const size_t filesPerThread =
-        (files.size() + threadCount - 1) / threadCount;
+        (normalFiles.size() + threadCount - 1) / threadCount;
 
-    for (size_t i = 0; i < threadCount && i * filesPerThread < files.size();
-         ++i) {
+    for (size_t i = 0;
+         i < threadCount && i * filesPerThread < normalFiles.size(); ++i) {
       const size_t start = i * filesPerThread;
-      const size_t end = std::min(start + filesPerThread, files.size());
+      const size_t end = std::min(start + filesPerThread, normalFiles.size());
 
-      threads.emplace_back([this, &files, start, end, &orderedResults] {
-        processFileChunk(std::span(files.begin() + start, files.begin() + end),
-                         orderedResults);
+      threads.emplace_back([this, &normalFiles, start, end, &orderedResults] {
+        processFileChunk(
+            std::span(normalFiles.begin() + start, normalFiles.begin() + end),
+            orderedResults);
       });
     }
 
@@ -347,19 +390,23 @@ public:
       thread.join();
     }
 
+    // Print ordered results for normal files (if -o is enabled)
     if (config.ordered) {
-      // Sort the results based on the original order in 'files'
-      std::sort(orderedResults.begin(), orderedResults.end(),
-                [&files](const auto &a, const auto &b) {
-                  return std::find(files.begin(), files.end(), a.first) <
-                         std::find(files.begin(), files.end(), b.first);
-                });
+      std::sort(
+          orderedResults.begin(), orderedResults.end(),
+          [&normalFiles](const auto &a, const auto &b) {
+            return std::find(normalFiles.begin(), normalFiles.end(), a.first) <
+                   std::find(normalFiles.begin(), normalFiles.end(), b.first);
+          });
 
-      // Print the ordered results
       for (const auto &result : orderedResults) {
         printToConsole(result.second);
       }
     }
+
+    // Process last files (always ordered)
+    processLastFiles(lastFiles);
+
     return true;
   }
 };
@@ -394,7 +441,9 @@ int main(int argc, char *argv[]) {
         << "  -p, --relative-path    Show relative path in file headers "
            "instead of filename\n"
         << "  -o, --ordered          Output files in the order they were "
-           "found\n";
+           "found\n"
+        << "  -z, --last <file>      Process specific file last (can be used "
+           "multiple times, order will be kept)\n";
     return 1;
   }
 
@@ -440,6 +489,10 @@ int main(int argc, char *argv[]) {
         config.showRelativePath = true;
       } else if (arg == "-o" || arg == "--ordered") {
         config.ordered = true;
+      } else if (arg == "-z" || arg == "--last") {
+        while (i + 1 < argc && argv[i + 1][0] != '-') {
+          config.lastFiles.push_back(argv[++i]);
+        }
       } else {
         std::cerr << "Invalid option: " << arg << "\n";
         return 1;
