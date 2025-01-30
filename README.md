@@ -106,7 +106,7 @@ Output files in the order they are found:
 Process `main.cpp` and `utils.h` last, in that order:
 
 ```bash
-./dircat . -z main.cpp -z utils.h
+./dircat . -z main.cpp utils.h
 ```
 
 Process all files, output them in order, and process `notes.txt` last:
