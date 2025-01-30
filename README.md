@@ -153,6 +153,7 @@ If `-w` (markdownlint fixes) is used, the output format changes slightly:
 
 ````md
 #
+
 ## File: filename.ext
 
 ```ext
