@@ -127,6 +127,13 @@ Apply Markdown linting fixes, remove comments, and order output:
 ./dircat . -w -c -o
 ```
 
+Example of what I'm currently using in large C# projects:
+
+```bash
+./dircat ./working-folder -e cs -l -p -o -w -z working-file-deps.cs working-file.cs 
+```
+
+
 ## Output Format
 
 Files are output in the following format:
