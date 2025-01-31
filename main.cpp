@@ -32,7 +32,8 @@ public:
     bool removeEmptyLines = false;
     bool showRelativePath = false;
     bool ordered = false;
-    std::vector<std::string> lastFiles; // Files to be processed last
+    std::vector<fs::path> lastFiles; // Relative paths to exact files
+    std::vector<fs::path> lastDirs;  // Relative paths to directories
     bool markdownlintFixes = false;
   };
 
@@ -43,6 +44,7 @@ private:
   std::atomic<size_t> totalBytes{0};
   mutable std::mutex consoleMutex;
   mutable std::mutex orderedResultsMutex;
+  std::vector<fs::path> lastFilesList;
   const std::chrono::steady_clock::time_point startTime{
       std::chrono::steady_clock::now()};
   const unsigned int threadCount;
@@ -235,7 +237,7 @@ private:
       return false;
 
     const std::string filename = path.filename().string();
-    for (const auto regexStr : config.regexFilters) {
+    for (const auto &regexStr : config.regexFilters) {
       try {
         std::regex regex(regexStr);
         if (std::regex_search(filename, regex)) {
@@ -258,68 +260,77 @@ private:
     std::cerr << "ERROR: " << message << '\n';
   }
 
-  std::vector<fs::path> collectFiles(std::vector<fs::path> &lastFiles) const {
+  std::vector<fs::path> collectFiles() {
     std::vector<fs::path> normalFiles;
-    std::unordered_set<std::string> lastFilesSet(config.lastFiles.begin(),
-                                                 config.lastFiles.end());
+    lastFilesList.clear();
+    std::unordered_set<fs::path> lastFilesSet;
+
+    // Lambda function to check if a file should be treated as a "last" file
+    auto isLastFile = [&](const fs::path &absPath) {
+      fs::path relPath = fs::relative(absPath, config.dirPath);
+
+      // Check in config.lastFiles (exact or filename match)
+      if (std::find(config.lastFiles.begin(), config.lastFiles.end(),
+                    relPath) != config.lastFiles.end() ||
+          std::find(config.lastFiles.begin(), config.lastFiles.end(),
+                    absPath.filename()) != config.lastFiles.end()) {
+        return true;
+      }
+
+      // Check if the file is within any of the lastDirs
+      for (const auto &dirRelPath : config.lastDirs) {
+        if (relPath.string().find(dirRelPath.string()) == 0) {
+          return true;
+        }
+      }
+
+      return false;
+    };
+
+    auto processEntry = [&](const auto &entry) {
+      if (shouldStop)
+        return;
+      if (fs::is_directory(entry) && shouldIgnoreFolder(entry.path())) {
+        if (config.recursiveSearch) {
+          auto it = fs::recursive_directory_iterator(entry);
+          it.disable_recursion_pending();
+        }
+        return;
+      }
+
+      if (fs::is_regular_file(entry) && isFileExtensionAllowed(entry) &&
+          !shouldIgnoreFile(entry.path()) &&
+          !matchesRegexFilters(entry.path())) {
+        if (isLastFile(entry.path())) {
+          // Insert into set to prevent duplicates; add to list if unique
+          if (lastFilesSet.insert(entry.path()).second) {
+            lastFilesList.push_back(entry.path());
+          }
+        } else {
+          normalFiles.push_back(entry.path());
+        }
+      }
+    };
 
     try {
-      auto iterator = fs::recursive_directory_iterator(
-          config.dirPath, fs::directory_options::skip_permission_denied);
       if (config.recursiveSearch) {
-        for (const auto &entry : iterator) {
-          if (shouldStop)
-            break;
-          if (fs::is_directory(entry) && shouldIgnoreFolder(entry.path())) {
-            iterator.disable_recursion_pending();
-            continue;
-          }
-          if (fs::is_regular_file(entry) && isFileExtensionAllowed(entry) &&
-              !shouldIgnoreFile(entry.path()) &&
-              !matchesRegexFilters(entry.path())) {
-            if (lastFilesSet.count(entry.path().filename().string())) {
-              lastFiles.push_back(entry.path());
-            } else {
-              normalFiles.push_back(entry.path());
-            }
-          }
+        for (auto it = fs::recursive_directory_iterator(
+                 config.dirPath, fs::directory_options::skip_permission_denied);
+             it != fs::recursive_directory_iterator(); ++it) {
+          processEntry(*it);
         }
       } else {
         for (const auto &entry : fs::directory_iterator(
                  config.dirPath,
                  fs::directory_options::skip_permission_denied)) {
-          if (shouldStop)
-            break;
-          if (fs::is_regular_file(entry) && isFileExtensionAllowed(entry) &&
-              !shouldIgnoreFile(entry.path()) &&
-              !matchesRegexFilters(entry.path())) {
-            if (lastFilesSet.count(entry.path().filename().string())) {
-              lastFiles.push_back(entry.path());
-            } else {
-              normalFiles.push_back(entry.path());
-            }
-          }
+          processEntry(entry);
         }
       }
-      std::sort(normalFiles.begin(), normalFiles.end());
-
-      // Sort and remove duplicates from lastFiles based on the order in
-      // config.lastFiles
-      std::vector<fs::path> sortedLastFiles;
-      for (const auto &filename : config.lastFiles) {
-        auto it = std::find_if(lastFiles.begin(), lastFiles.end(),
-                               [&filename](const fs::path &path) {
-                                 return path.filename().string() == filename;
-                               });
-        if (it != lastFiles.end()) {
-          sortedLastFiles.push_back(*it);
-        }
-      }
-      lastFiles = sortedLastFiles;
-
     } catch (const fs::filesystem_error &e) {
       logError("Error scanning directory: " + std::string(e.what()));
     }
+
+    std::sort(normalFiles.begin(), normalFiles.end());
     return normalFiles;
   }
 
@@ -345,18 +356,89 @@ private:
     }
   }
 
-  void processLastFiles(const std::vector<fs::path> &lastFiles) {
-    for (const auto &path : lastFiles) {
-      if (shouldStop)
-        break;
-      try {
-        FileProcessor processor(*this, path);
-        if (processor.process()) {
-          printToConsole(processor.getContent().str());
-          ++processedFiles;
-        }
-      } catch (const std::exception &e) {
-        logError(std::format("Exception in processLastFiles: {}", e.what()));
+  void processLastFiles() {
+    // Sort lastFilesList based on the order in config.lastFiles and
+    // config.lastDirs
+    std::sort(
+        lastFilesList.begin(), lastFilesList.end(),
+        [&](const fs::path &a, const fs::path &b) {
+          fs::path relA = fs::relative(a, config.dirPath);
+          fs::path relB = fs::relative(b, config.dirPath);
+
+          auto findPosition = [&](const fs::path &relPath) -> int {
+            // Check if the file is in lastFiles (exact match or filename)
+            bool isInLastFiles = false;
+            auto exactIt = std::find(config.lastFiles.begin(),
+                                     config.lastFiles.end(), relPath);
+            if (exactIt != config.lastFiles.end()) {
+              isInLastFiles = true;
+            } else {
+              auto filenameIt =
+                  std::find(config.lastFiles.begin(), config.lastFiles.end(),
+                            relPath.filename());
+              if (filenameIt != config.lastFiles.end()) {
+                isInLastFiles = true;
+              }
+            }
+
+            if (!isInLastFiles) {
+              // Check if the file is in any of the lastDirs
+              for (size_t i = 0; i < config.lastDirs.size(); ++i) {
+                if (relPath.string().find(config.lastDirs[i].string()) == 0) {
+                  return i; // Position based on lastDirs order
+                }
+              }
+            }
+
+            // Handle files in lastFiles
+            if (isInLastFiles) {
+              // Find the index in lastFiles considering both exact and filename
+              // matches
+              exactIt = std::find(config.lastFiles.begin(),
+                                  config.lastFiles.end(), relPath);
+              if (exactIt != config.lastFiles.end()) {
+                return config.lastDirs.size() +
+                       std::distance(config.lastFiles.begin(), exactIt);
+              } else {
+                auto filenameIt =
+                    std::find(config.lastFiles.begin(), config.lastFiles.end(),
+                              relPath.filename());
+                if (filenameIt != config.lastFiles.end()) {
+                  return config.lastDirs.size() +
+                         std::distance(config.lastFiles.begin(), filenameIt);
+                }
+              }
+            }
+
+            return -1; // Should not reach here
+          };
+
+          int posA = findPosition(relA);
+          int posB = findPosition(relB);
+
+          if (posA >= config.lastFiles.size() &&
+              posB >= config.lastFiles.size()) {
+            // Both files are in lastDirs, compare their positions within
+            // lastDirs
+            return posA < posB;
+          } else if (posA >= config.lastFiles.size()) {
+            // A is in lastDirs, B is in lastFiles, A should come after B
+            return false;
+          } else if (posB >= config.lastFiles.size()) {
+            // B is in lastDirs, A is in lastFiles, B should come after A
+            return true;
+          } else {
+            // Both files are in lastFiles, compare their positions within
+            // lastFiles
+            return posA < posB;
+          }
+        });
+
+    for (const auto &file : lastFilesList) {
+      FileProcessor processor(*this, file);
+      if (processor.process()) {
+        printToConsole(processor.getContent().str());
+        ++processedFiles;
       }
     }
   }
@@ -374,10 +456,10 @@ public:
       return false;
     }
 
-    std::vector<fs::path> lastFiles;
-    auto normalFiles = collectFiles(lastFiles);
+    auto normalFiles = collectFiles();
 
-    if (normalFiles.empty() && lastFiles.empty()) {
+    if (normalFiles.empty() && config.lastFiles.empty() &&
+        config.lastDirs.empty()) {
       printToConsole(std::format("No matching files found in: {}\n",
                                  config.dirPath.string()));
       return true;
@@ -439,7 +521,7 @@ public:
     }
 
     // Process last files (always ordered)
-    processLastFiles(lastFiles);
+    processLastFiles();
 
     return true;
   }
@@ -476,8 +558,8 @@ int main(int argc, char *argv[]) {
            "instead of filename\n"
         << "  -o, --ordered          Output files in the order they were "
            "found\n"
-        << "  -z, --last <file>      Process specific file last (can be used "
-           "multiple times, order will be kept)\n"
+        << "  -z, --last <item>      Process specified file, directory, or "
+           "filename last (order of multiple -z options is preserved).\n"
         << "  -w, --markdownlint-fixes Enable fixes for Markdown linting\n";
     return 1;
   }
@@ -526,7 +608,18 @@ int main(int argc, char *argv[]) {
         config.ordered = true;
       } else if (arg == "-z" || arg == "--last") {
         while (i + 1 < argc && argv[i + 1][0] != '-') {
-          config.lastFiles.push_back(argv[++i]);
+          std::string entry = argv[++i];
+          fs::path absPath = config.dirPath / entry;
+          if (fs::exists(absPath)) {
+            if (fs::is_directory(absPath)) {
+              config.lastDirs.push_back(fs::path(entry).lexically_normal());
+            } else {
+              config.lastFiles.push_back(fs::path(entry).lexically_normal());
+            }
+          } else {
+            // Treat as a file (may not exist yet)
+            config.lastFiles.push_back(fs::path(entry).lexically_normal());
+          }
         }
       } else if (arg == "-w" || arg == "--markdownlint-fixes") {
         config.markdownlintFixes = true;
