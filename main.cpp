@@ -1,405 +1,375 @@
 #include <algorithm>
 #include <atomic>
-#include <chrono>
 #include <csignal>
 #include <filesystem>
-#include <format>
 #include <fstream>
 #include <iostream>
 #include <mutex>
 #include <regex>
 #include <span>
 #include <sstream>
-#include <string>
 #include <thread>
 #include <unordered_set>
 #include <vector>
 
 namespace fs = std::filesystem;
 
+struct Config {
+  fs::path dirPath;
+  unsigned long long maxFileSizeB = 0;
+  bool recursiveSearch = true;
+  std::vector<std::string> fileExtensions;
+  bool ignoreDotFolders = true;
+  std::vector<std::string> ignoredFolders;
+  std::vector<std::string> ignoredFiles;
+  std::vector<std::string> regexFilters;
+  bool removeComments = false;
+  bool removeEmptyLines = false;
+  bool showRelativePath = false;
+  bool ordered = false;
+  std::vector<fs::path> lastFiles;
+  std::vector<fs::path> lastDirs;
+  bool markdownlintFixes = false;
+};
+
 class DirectoryProcessor {
 public:
-  struct Config {
-    fs::path dirPath;
-    unsigned long long maxFileSizeB = 0; // Default: no limit
-    bool recursiveSearch = true;
-    std::vector<std::string> fileExtensions;
-    bool ignoreDotFolders = true;
-    std::vector<std::string> ignoredFolders;
-    std::vector<std::string> ignoredFiles;
-    std::vector<std::string> regexFilters;
-    bool removeComments = false;
-    bool removeEmptyLines = false;
-    bool showRelativePath = false;
-    bool ordered = false;
-    std::vector<fs::path> lastFiles; // Relative paths to exact files
-    std::vector<fs::path> lastDirs;  // Relative paths to directories
-    bool markdownlintFixes = false;
-  };
+  DirectoryProcessor(Config cfg)
+      : config(std::move(cfg)),
+        threadCount(std::min(std::thread::hardware_concurrency(), 8u)) {}
+
+  void stop() { shouldStop = true; }
+
+  bool process();
 
 private:
-  const Config config;
+  Config config;
   std::atomic<bool> shouldStop{false};
   std::atomic<size_t> processedFiles{0};
   std::atomic<size_t> totalBytes{0};
   mutable std::mutex consoleMutex;
   mutable std::mutex orderedResultsMutex;
   std::vector<fs::path> lastFilesList;
-  const std::chrono::steady_clock::time_point startTime{
-      std::chrono::steady_clock::now()};
+
   const unsigned int threadCount;
 
-  class FileProcessor {
-    DirectoryProcessor &processor;
-    const fs::path &path;
-    std::stringstream content;
+  bool isFileSizeValid(const fs::path &path) const;
+  bool isFileExtensionAllowed(const fs::path &path) const;
+  bool shouldIgnoreFolder(const fs::path &path) const;
+  bool shouldIgnoreFile(const fs::path &path) const;
+  bool matchesRegexFilters(const fs::path &path) const;
+  void printToConsole(const std::string &message) const;
+  void logError(const std::string &message) const;
+  std::vector<fs::path> collectFiles();
+  void processFileChunk(std::span<const fs::path> chunk,
+                        std::vector<std::pair<fs::path, std::string>> &results);
+  void
+  processSingleFile(const fs::path &path,
+                    std::vector<std::pair<fs::path, std::string>> &results);
+  void processLastFiles();
+  std::string removeCppComments(const std::string &code);
+};
 
-    std::string removeCppComments(const std::string &code) {
-      std::string result;
-      bool inString = false;
-      bool inChar = false;
-      bool inSingleLineComment = false;
-      bool inMultiLineComment = false;
+bool DirectoryProcessor::isFileSizeValid(const fs::path &path) const {
+  try {
+    return config.maxFileSizeB == 0 ||
+           fs::file_size(path) <= config.maxFileSizeB;
+  } catch (const fs::filesystem_error &) {
+    return false;
+  }
+}
 
-      for (size_t i = 0; i < code.size(); ++i) {
-        if (inString) {
-          if (code[i] == '\\' && i + 1 < code.size()) {
-            result += code[i];
-            result += code[++i];
-          } else {
-            if (code[i] == '"') {
-              inString = false;
-            }
-            result += code[i];
-          }
-        } else if (inChar) {
-          if (code[i] == '\\' && i + 1 < code.size()) {
-            result += code[i];
-            result += code[++i];
-          } else {
-            if (code[i] == '\'') {
-              inChar = false;
-            }
-            result += code[i];
-          }
-        } else if (inSingleLineComment) {
-          if (code[i] == '\n') {
-            inSingleLineComment = false;
-            result += code[i];
-          }
-        } else if (inMultiLineComment) {
-          if (code[i] == '*' && i + 1 < code.size() && code[i + 1] == '/') {
-            inMultiLineComment = false;
-            ++i;
-          }
-        } else {
-          if (code[i] == '"') {
-            inString = true;
-            result += code[i];
-          } else if (code[i] == '\'') {
-            inChar = true;
-            result += code[i];
-          } else if (code[i] == '/' && i + 1 < code.size() &&
-                     code[i + 1] == '/') {
-            inSingleLineComment = true;
-            ++i;
-          } else if (code[i] == '/' && i + 1 < code.size() &&
-                     code[i + 1] == '*') {
-            inMultiLineComment = true;
-            ++i;
-          } else {
-            result += code[i];
-          }
-        }
+bool DirectoryProcessor::isFileExtensionAllowed(const fs::path &path) const {
+  if (config.fileExtensions.empty())
+    return true;
+  const auto ext = path.extension().string();
+  if (ext.empty())
+    return false;
+  return std::find(config.fileExtensions.begin(), config.fileExtensions.end(),
+                   ext.substr(1)) != config.fileExtensions.end();
+}
+
+bool DirectoryProcessor::shouldIgnoreFolder(const fs::path &path) const {
+  if (config.ignoreDotFolders && path.filename().string().front() == '.')
+    return true;
+  return std::find(config.ignoredFolders.begin(), config.ignoredFolders.end(),
+                   path.filename().string()) != config.ignoredFolders.end();
+}
+
+bool DirectoryProcessor::shouldIgnoreFile(const fs::path &path) const {
+  const auto filename = path.filename().string();
+  const auto relativePath = fs::relative(path, config.dirPath).string();
+
+  // Check ignoredFiles list for either the filename or the relative path
+  return std::find(config.ignoredFiles.begin(), config.ignoredFiles.end(),
+                   filename) != config.ignoredFiles.end() ||
+         std::find(config.ignoredFiles.begin(), config.ignoredFiles.end(),
+                   relativePath) != config.ignoredFiles.end();
+}
+
+bool DirectoryProcessor::matchesRegexFilters(const fs::path &path) const {
+  if (config.regexFilters.empty())
+    return false;
+  const std::string filename = path.filename().string();
+  for (const auto &regexStr : config.regexFilters) {
+    try {
+      if (std::regex_search(filename, std::regex(regexStr)))
+        return true;
+    } catch (const std::regex_error &e) {
+      logError("Invalid regex: " + regexStr + ": " + e.what());
+    }
+  }
+  return false;
+}
+
+void DirectoryProcessor::printToConsole(const std::string &message) const {
+  std::lock_guard<std::mutex> lock(consoleMutex);
+  std::cout << message;
+}
+
+void DirectoryProcessor::logError(const std::string &message) const {
+  std::lock_guard<std::mutex> lock(consoleMutex);
+  std::cerr << "ERROR: " << message << '\n';
+}
+
+std::string DirectoryProcessor::removeCppComments(const std::string &code) {
+  std::string result;
+  bool inString = false;
+  bool inChar = false;
+  bool inSingleLineComment = false;
+  bool inMultiLineComment = false;
+
+  for (size_t i = 0; i < code.size(); ++i) {
+    if (inString) {
+      result += code[i];
+      if (code[i] == '\\' && i + 1 < code.size()) {
+        result += code[++i]; // Handle escaped characters
+      } else if (code[i] == '"') {
+        inString = false;
       }
+    } else if (inChar) {
+      result += code[i];
+      if (code[i] == '\\' && i + 1 < code.size()) {
+        result += code[++i]; // Handle escaped characters
+      } else if (code[i] == '\'') {
+        inChar = false;
+      }
+    } else if (inSingleLineComment) {
+      if (code[i] == '\n') {
+        inSingleLineComment = false;
+        result += code[i];
+      }
+    } else if (inMultiLineComment) {
+      if (code[i] == '*' && i + 1 < code.size() && code[i + 1] == '/') {
+        inMultiLineComment = false;
+        ++i; // Skip the closing '/'
+      }
+    } else {
+      if (code[i] == '"') {
+        inString = true;
+        result += code[i];
+      } else if (code[i] == '\'') {
+        inChar = true;
+        result += code[i];
+      } else if (code[i] == '/' && i + 1 < code.size()) {
+        if (code[i + 1] == '/') {
+          inSingleLineComment = true;
+          ++i;
+        } else if (code[i + 1] == '*') {
+          inMultiLineComment = true;
+          ++i;
+        } else {
+          result += code[i];
+        }
+      } else {
+        result += code[i];
+      }
+    }
+  }
+  return result;
+}
 
-      return result;
+std::vector<fs::path> DirectoryProcessor::collectFiles() {
+  std::vector<fs::path> normalFiles;
+  lastFilesList.clear();
+  std::unordered_set<fs::path> lastFilesSet;
+
+  auto isLastFile = [&](const fs::path &absPath) {
+    fs::path relPath = fs::relative(absPath, config.dirPath);
+
+    // Check in config.lastFiles (exact or filename match)
+    if (std::find(config.lastFiles.begin(), config.lastFiles.end(), relPath) !=
+            config.lastFiles.end() ||
+        std::find(config.lastFiles.begin(), config.lastFiles.end(),
+                  absPath.filename()) != config.lastFiles.end()) {
+      return true;
     }
 
-    bool readFile() {
-      std::ifstream file(path, std::ios::binary);
-      if (!file)
-        return false;
+    // Check if the file is within any of the lastDirs
+    return std::any_of(config.lastDirs.begin(), config.lastDirs.end(),
+                       [&](const auto &dirRelPath) {
+                         return relPath.string().find(dirRelPath.string()) == 0;
+                       });
+  };
 
-      if (processor.config.markdownlintFixes)
-        content << "\n## File: ";
-      else
-        content << "\n### File: ";
-      if (processor.config.showRelativePath) {
-        content << fs::relative(path, processor.config.dirPath).string();
+  auto processEntry = [&](const auto &entry) {
+    if (shouldStop)
+      return;
+    if (fs::is_directory(entry) && shouldIgnoreFolder(entry.path())) {
+      if (config.recursiveSearch)
+        fs::recursive_directory_iterator(entry).disable_recursion_pending();
+      return;
+    }
+
+    if (fs::is_regular_file(entry) && isFileExtensionAllowed(entry) &&
+        !shouldIgnoreFile(entry.path()) && !matchesRegexFilters(entry.path())) {
+      if (isLastFile(entry.path())) {
+        if (lastFilesSet.insert(entry.path()).second)
+          lastFilesList.push_back(entry.path());
       } else {
-        content << path.filename().string();
+        normalFiles.push_back(entry.path());
       }
+    }
+  };
 
-      if (processor.config.markdownlintFixes)
-        content << '\n';
+  try {
+    auto options = fs::directory_options::skip_permission_denied;
 
-      content << "\n```";
-      if (path.has_extension()) {
+    if (config.recursiveSearch) {
+      for (auto &entry :
+           fs::recursive_directory_iterator(config.dirPath, options)) {
+        processEntry(entry);
+      }
+    } else {
+      for (auto &entry : fs::directory_iterator(config.dirPath, options)) {
+        processEntry(entry);
+      }
+    }
+  } catch (const fs::filesystem_error &e) {
+    logError("Error scanning directory: " + std::string(e.what()));
+  }
+
+  std::sort(normalFiles.begin(), normalFiles.end());
+  return normalFiles;
+}
+
+void DirectoryProcessor::processFileChunk(
+    std::span<const fs::path> chunk,
+    std::vector<std::pair<fs::path, std::string>> &results) {
+  for (const auto &path : chunk) {
+    if (shouldStop)
+      break;
+    try {
+      std::ifstream file(path, std::ios::binary);
+      if (!file || !isFileSizeValid(path))
+        continue;
+
+      std::stringstream content;
+      content << (config.markdownlintFixes ? "\n## File: " : "\n### File: ")
+              << (config.showRelativePath
+                      ? fs::relative(path, config.dirPath).string()
+                      : path.filename().string())
+              << (config.markdownlintFixes ? "\n" : "") << "\n```";
+      if (path.has_extension())
         content << path.extension().string().substr(1);
-      }
       content << "\n";
 
-      // Read file content in chunks to handle large files better
-      constexpr size_t BUFFER_SIZE = 8192;
-      char buffer[BUFFER_SIZE];
-      std::string fileContent;
+      std::string fileContent((std::istreambuf_iterator<char>(file)),
+                              std::istreambuf_iterator<char>());
 
-      while (file.good() && !processor.shouldStop) {
-        file.read(buffer, BUFFER_SIZE);
-        fileContent.append(buffer, file.gcount());
-      }
-
-      if (processor.config.removeComments) {
+      if (config.removeComments)
         fileContent = removeCppComments(fileContent);
-      }
 
-      std::string line;
       std::istringstream iss(fileContent);
+      std::string line;
       while (std::getline(iss, line)) {
-        // Remove trailing '\r' to handle CRLF line endings
-        if (!line.empty() && line.back() == '\r') {
+        if (!line.empty() && line.back() == '\r')
           line.pop_back();
-        }
-        if (processor.config.removeEmptyLines &&
-            line.find_first_not_of(" \t\r\n") == std::string::npos) {
+        if (config.removeEmptyLines &&
+            line.find_first_not_of(" \t\r\n") == std::string::npos)
           continue;
-        }
         content << line << '\n';
       }
 
       content << "\n```\n";
-      processor.totalBytes += fs::file_size(path);
-      return true;
-    }
+      totalBytes += fs::file_size(path);
 
-  public:
-    FileProcessor(DirectoryProcessor &proc, const fs::path &p)
-        : processor(proc), path(p) {}
-
-    bool process() {
-      try {
-        if (!processor.isFileSizeValid(path))
-          return false;
-        if (!readFile()) {
-          processor.logError("Failed to process: " + path.string());
-          return false;
-        }
-        if (!processor.config.ordered) {
-          processor.printToConsole(content.str());
-        }
-        return true;
-      } catch (const std::exception &e) {
-        processor.logError(
-            std::format("Error processing {}: {}", path.string(), e.what()));
-        return false;
-      }
-    }
-
-    const std::stringstream &getContent() const { return content; }
-  };
-
-  bool isFileSizeValid(const fs::path &path) const {
-    try {
-      return config.maxFileSizeB == 0 ||
-             fs::file_size(path) <= config.maxFileSizeB;
-    } catch (const fs::filesystem_error &) {
-      return false;
-    }
-  }
-
-  bool isFileExtensionAllowed(const fs::path &path) const {
-    if (config.fileExtensions.empty())
-      return true;
-    const auto ext = path.extension().string();
-    if (ext.empty())
-      return false;
-    return std::find(config.fileExtensions.begin(), config.fileExtensions.end(),
-                     ext.substr(1)) != config.fileExtensions.end();
-  }
-
-  bool shouldIgnoreFolder(const fs::path &path) const {
-    if (config.ignoreDotFolders && path.filename().string().front() == '.') {
-      return true;
-    }
-    return std::find(config.ignoredFolders.begin(), config.ignoredFolders.end(),
-                     path.filename().string()) != config.ignoredFolders.end();
-  }
-
-  bool shouldIgnoreFile(const fs::path &path) const {
-    return std::find(config.ignoredFiles.begin(), config.ignoredFiles.end(),
-                     path.filename().string()) != config.ignoredFiles.end();
-  }
-
-  // Function to check if a file matches any of the regex filters
-  bool matchesRegexFilters(const fs::path &path) const {
-    if (config.regexFilters.empty())
-      return false;
-
-    const std::string filename = path.filename().string();
-    for (const auto &regexStr : config.regexFilters) {
-      try {
-        std::regex regex(regexStr);
-        if (std::regex_search(filename, regex)) {
-          return true;
-        }
-      } catch (const std::regex_error &e) {
-        logError(std::format("Invalid regex: {}: {}", regexStr, e.what()));
-      }
-    }
-    return false;
-  }
-
-  void printToConsole(const std::string &message) const {
-    std::lock_guard<std::mutex> lock(consoleMutex);
-    std::cout << message;
-  }
-
-  void logError(const std::string &message) const {
-    std::lock_guard<std::mutex> lock(consoleMutex);
-    std::cerr << "ERROR: " << message << '\n';
-  }
-
-  std::vector<fs::path> collectFiles() {
-    std::vector<fs::path> normalFiles;
-    lastFilesList.clear();
-    std::unordered_set<fs::path> lastFilesSet;
-
-    // Lambda function to check if a file should be treated as a "last" file
-    auto isLastFile = [&](const fs::path &absPath) {
-      fs::path relPath = fs::relative(absPath, config.dirPath);
-
-      // Check in config.lastFiles (exact or filename match)
-      if (std::find(config.lastFiles.begin(), config.lastFiles.end(),
-                    relPath) != config.lastFiles.end() ||
-          std::find(config.lastFiles.begin(), config.lastFiles.end(),
-                    absPath.filename()) != config.lastFiles.end()) {
-        return true;
-      }
-
-      // Check if the file is within any of the lastDirs
-      for (const auto &dirRelPath : config.lastDirs) {
-        if (relPath.string().find(dirRelPath.string()) == 0) {
-          return true;
-        }
-      }
-
-      return false;
-    };
-
-    auto processEntry = [&](const auto &entry) {
-      if (shouldStop)
-        return;
-      if (fs::is_directory(entry) && shouldIgnoreFolder(entry.path())) {
-        if (config.recursiveSearch) {
-          auto it = fs::recursive_directory_iterator(entry);
-          it.disable_recursion_pending();
-        }
-        return;
-      }
-
-      if (fs::is_regular_file(entry) && isFileExtensionAllowed(entry) &&
-          !shouldIgnoreFile(entry.path()) &&
-          !matchesRegexFilters(entry.path())) {
-        if (isLastFile(entry.path())) {
-          // Insert into set to prevent duplicates; add to list if unique
-          if (lastFilesSet.insert(entry.path()).second) {
-            lastFilesList.push_back(entry.path());
-          }
-        } else {
-          normalFiles.push_back(entry.path());
-        }
-      }
-    };
-
-    try {
-      if (config.recursiveSearch) {
-        for (auto it = fs::recursive_directory_iterator(
-                 config.dirPath, fs::directory_options::skip_permission_denied);
-             it != fs::recursive_directory_iterator(); ++it) {
-          processEntry(*it);
-        }
+      if (config.ordered) {
+        std::lock_guard<std::mutex> lock(orderedResultsMutex);
+        results.emplace_back(path, content.str());
       } else {
-        for (const auto &entry : fs::directory_iterator(
-                 config.dirPath,
-                 fs::directory_options::skip_permission_denied)) {
-          processEntry(entry);
-        }
+        printToConsole(content.str());
       }
-    } catch (const fs::filesystem_error &e) {
-      logError("Error scanning directory: " + std::string(e.what()));
-    }
-
-    std::sort(normalFiles.begin(), normalFiles.end());
-    return normalFiles;
-  }
-
-  void
-  processFileChunk(std::span<const fs::path> chunk,
-                   std::vector<std::pair<fs::path, std::string>> &results) {
-    for (const auto &path : chunk) {
-      if (shouldStop)
-        break;
-      try {
-        FileProcessor processor(*this, path);
-        if (processor.process()) {
-          if (config.ordered) {
-            // Lock mutex before modifying orderedResults
-            std::lock_guard<std::mutex> lock(orderedResultsMutex);
-            results.emplace_back(path, processor.getContent().str());
-          }
-          ++processedFiles;
-        }
-      } catch (const std::exception &e) {
-        logError(std::format("Exception in processFileChunk: {}", e.what()));
-      }
+      ++processedFiles;
+    } catch (const std::exception &e) {
+      logError("Error processing " + path.string() + ": " + e.what());
     }
   }
+}
 
-  void processLastFiles() {
-    // Sort lastFilesList based on the order in config.lastFiles and
-    // config.lastDirs
-    std::sort(
-        lastFilesList.begin(), lastFilesList.end(),
-        [&](const fs::path &a, const fs::path &b) {
-          fs::path relA = fs::relative(a, config.dirPath);
-          fs::path relB = fs::relative(b, config.dirPath);
+void DirectoryProcessor::processSingleFile(
+    const fs::path &path,
+    std::vector<std::pair<fs::path, std::string>> &results) {
+  if (shouldStop)
+    return;
+  try {
+    std::ifstream file(path, std::ios::binary);
+    if (!file || !isFileSizeValid(path))
+      return;
 
-          auto findPosition = [&](const fs::path &relPath) -> int {
-            // Check if the file is in lastFiles (exact match or filename)
-            bool isInLastFiles = false;
-            auto exactIt = std::find(config.lastFiles.begin(),
-                                     config.lastFiles.end(), relPath);
-            if (exactIt != config.lastFiles.end()) {
-              isInLastFiles = true;
-            } else {
-              auto filenameIt =
-                  std::find(config.lastFiles.begin(), config.lastFiles.end(),
-                            relPath.filename());
-              if (filenameIt != config.lastFiles.end()) {
-                isInLastFiles = true;
-              }
-            }
+    std::stringstream content;
+    content << (config.markdownlintFixes ? "\n## File: " : "\n### File: ")
+            << (config.showRelativePath
+                    ? fs::relative(path, config.dirPath).string()
+                    : path.filename().string())
+            << (config.markdownlintFixes ? "\n" : "") << "\n```";
+    if (path.has_extension())
+      content << path.extension().string().substr(1);
+    content << "\n";
 
-            if (!isInLastFiles) {
-              // Check if the file is in any of the lastDirs
-              for (size_t i = 0; i < config.lastDirs.size(); ++i) {
-                if (relPath.string().find(config.lastDirs[i].string()) == 0) {
-                  return i; // Position based on lastDirs order
+    std::string fileContent((std::istreambuf_iterator<char>(file)),
+                            std::istreambuf_iterator<char>());
+
+    if (config.removeComments)
+      fileContent = removeCppComments(fileContent);
+
+    std::istringstream iss(fileContent);
+    std::string line;
+    while (std::getline(iss, line)) {
+      if (!line.empty() && line.back() == '\r')
+        line.pop_back();
+      if (config.removeEmptyLines &&
+          line.find_first_not_of(" \t\r\n") == std::string::npos)
+        continue;
+      content << line << '\n';
+    }
+
+    content << "\n```\n";
+    totalBytes += fs::file_size(path);
+
+    printToConsole(content.str());
+    ++processedFiles;
+  } catch (const std::exception &e) {
+    logError("Error processing " + path.string() + ": " + e.what());
+  }
+}
+
+void DirectoryProcessor::processLastFiles() {
+  std::sort(lastFilesList.begin(), lastFilesList.end(),
+            [&](const fs::path &a, const fs::path &b) {
+              fs::path relA = fs::relative(a, config.dirPath);
+              fs::path relB = fs::relative(b, config.dirPath);
+
+              auto findPosition = [&](const fs::path &relPath) -> int {
+                // Check if the file is in lastFiles (exact match)
+                auto exactIt = std::find(config.lastFiles.begin(),
+                                         config.lastFiles.end(), relPath);
+                if (exactIt != config.lastFiles.end()) {
+                  return config.lastDirs.size() +
+                         std::distance(config.lastFiles.begin(), exactIt);
                 }
-              }
-            }
 
-            // Handle files in lastFiles
-            if (isInLastFiles) {
-              // Find the index in lastFiles considering both exact and filename
-              // matches
-              exactIt = std::find(config.lastFiles.begin(),
-                                  config.lastFiles.end(), relPath);
-              if (exactIt != config.lastFiles.end()) {
-                return config.lastDirs.size() +
-                       std::distance(config.lastFiles.begin(), exactIt);
-              } else {
+                // Check if the file is in lastFiles (filename match)
                 auto filenameIt =
                     std::find(config.lastFiles.begin(), config.lastFiles.end(),
                               relPath.filename());
@@ -407,127 +377,91 @@ private:
                   return config.lastDirs.size() +
                          std::distance(config.lastFiles.begin(), filenameIt);
                 }
-              }
-            }
 
-            return -1; // Should not reach here
-          };
+                // Check if the file is in any of the lastDirs
+                for (size_t i = 0; i < config.lastDirs.size(); ++i) {
+                  if (relPath.string().find(config.lastDirs[i].string()) == 0) {
+                    return i;
+                  }
+                }
 
-          int posA = findPosition(relA);
-          int posB = findPosition(relB);
+                return -1; // Should not reach here
+              };
 
-          if (posA >= config.lastFiles.size() &&
-              posB >= config.lastFiles.size()) {
-            // Both files are in lastDirs, compare their positions within
-            // lastDirs
-            return posA < posB;
-          } else if (posA >= config.lastFiles.size()) {
-            // A is in lastDirs, B is in lastFiles, A should come after B
-            return false;
-          } else if (posB >= config.lastFiles.size()) {
-            // B is in lastDirs, A is in lastFiles, B should come after A
-            return true;
-          } else {
-            // Both files are in lastFiles, compare their positions within
-            // lastFiles
-            return posA < posB;
-          }
-        });
+              int posA = findPosition(relA);
+              int posB = findPosition(relB);
+              return posA < posB;
+            });
 
-    for (const auto &file : lastFilesList) {
-      FileProcessor processor(*this, file);
-      if (processor.process()) {
-        printToConsole(processor.getContent().str());
-        ++processedFiles;
-      }
-    }
+  for (const auto &file : lastFilesList) {
+    // Use processSingleFile for individual files
+    std::vector<std::pair<fs::path, std::string>>
+        results; // Not used, but keeping the signature consistent
+    processSingleFile(file, results);
+  }
+}
+
+bool DirectoryProcessor::process() {
+  if (!fs::exists(config.dirPath) || !fs::is_directory(config.dirPath)) {
+    logError("Invalid directory path: " + config.dirPath.string());
+    return false;
   }
 
-public:
-  DirectoryProcessor(Config cfg)
-      : config(std::move(cfg)),
-        threadCount(std::min(std::thread::hardware_concurrency(),
-                             static_cast<unsigned int>(8))) {}
-  void stop() { shouldStop = true; }
+  auto normalFiles = collectFiles();
 
-  bool process() {
-    if (!fs::exists(config.dirPath) || !fs::is_directory(config.dirPath)) {
-      logError("Invalid directory path: " + config.dirPath.string());
-      return false;
-    }
-
-    auto normalFiles = collectFiles();
-
-    if (normalFiles.empty() && config.lastFiles.empty() &&
-        config.lastDirs.empty()) {
-      printToConsole(std::format("No matching files found in: {}\n",
-                                 config.dirPath.string()));
-      return true;
-    }
-
-    // Process normal files
-    std::vector<std::pair<fs::path, std::string>> orderedResults;
-    if (config.ordered) {
-      orderedResults.reserve(normalFiles.size());
-    }
-
-    std::vector<std::thread> threads;
-    const size_t filesPerThread =
-        (normalFiles.size() + threadCount - 1) / threadCount;
-
-    if (config.markdownlintFixes)
-      printToConsole("#\n");
-
-    for (size_t i = 0;
-         i < threadCount && i * filesPerThread < normalFiles.size(); ++i) {
-      const size_t start = i * filesPerThread;
-      const size_t end = std::min(start + filesPerThread, normalFiles.size());
-
-      threads.emplace_back([this, &normalFiles, start, end, &orderedResults] {
-        try {
-          processFileChunk(
-              std::span(normalFiles.begin() + start, normalFiles.begin() + end),
-              orderedResults);
-        } catch (const std::exception &e) {
-          logError(std::format("Exception in thread: {}", e.what()));
-        }
-      });
-    }
-
-    for (auto &thread : threads) {
-      thread.join();
-    }
-
-    // Print ordered results for normal files (if -o is enabled)
-    if (config.ordered) {
-      try {
-        // Lock mutex before accessing orderedResults
-        std::lock_guard<std::mutex> lock(orderedResultsMutex);
-        std::sort(orderedResults.begin(), orderedResults.end(),
-                  [&normalFiles](const auto &a, const auto &b) {
-                    return std::find(normalFiles.begin(), normalFiles.end(),
-                                     a.first) < std::find(normalFiles.begin(),
-                                                          normalFiles.end(),
-                                                          b.first);
-                  });
-
-        for (const auto &result : orderedResults) {
-          printToConsole(result.second);
-        }
-      } catch (const std::exception &e) {
-        logError(std::format(
-            "Exception while sorting/printing ordered results: {}", e.what()));
-      }
-    }
-
-    // Process last files (always ordered)
-    processLastFiles();
-
+  if (normalFiles.empty() && config.lastFiles.empty() &&
+      config.lastDirs.empty()) {
+    printToConsole("No matching files found in: " + config.dirPath.string() +
+                   "\n");
     return true;
   }
-};
 
-// Signal handler
+  std::vector<std::pair<fs::path, std::string>> orderedResults;
+  if (config.ordered)
+    orderedResults.reserve(normalFiles.size());
+
+  std::vector<std::thread> threads;
+  const size_t filesPerThread =
+      (normalFiles.size() + threadCount - 1) / threadCount;
+
+  if (config.markdownlintFixes)
+    printToConsole("#\n");
+
+  for (size_t i = 0; i < threadCount && i * filesPerThread < normalFiles.size();
+       ++i) {
+    threads.emplace_back([this, &normalFiles, &orderedResults, i,
+                          filesPerThread] {
+      try {
+        processFileChunk(
+            std::span(normalFiles.begin() + i * filesPerThread,
+                      std::min(normalFiles.begin() + (i + 1) * filesPerThread,
+                               normalFiles.end())),
+            orderedResults);
+      } catch (const std::exception &e) {
+        logError("Exception in thread: " + std::string(e.what()));
+      }
+    });
+  }
+
+  for (auto &thread : threads)
+    thread.join();
+
+  if (config.ordered) {
+    std::lock_guard<std::mutex> lock(orderedResultsMutex);
+    std::sort(
+        orderedResults.begin(), orderedResults.end(),
+        [&normalFiles](const auto &a, const auto &b) {
+          return std::find(normalFiles.begin(), normalFiles.end(), a.first) <
+                 std::find(normalFiles.begin(), normalFiles.end(), b.first);
+        });
+    for (const auto &result : orderedResults)
+      printToConsole(result.second);
+  }
+
+  processLastFiles();
+  return true;
+}
+
 DirectoryProcessor *globalProcessor = nullptr;
 void signalHandler(int signum) {
   if (globalProcessor) {
@@ -564,81 +498,59 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  try {
-    DirectoryProcessor::Config config;
-    config.dirPath = argv[1];
+  Config config;
+  config.dirPath = argv[1];
 
-    // Parse command line options
-    for (int i = 2; i < argc; ++i) {
-      std::string_view arg = argv[i];
-      if ((arg == "-m" || arg == "--max-size") && i + 1 < argc) {
-        config.maxFileSizeB = std::stoll(argv[++i]);
-      } else if (arg == "-n" || arg == "--no-recursive") {
-        config.recursiveSearch = false;
-      } else if (arg == "-e" || arg == "--ext") {
-        while (i + 1 < argc && argv[i + 1][0] != '-') {
-          config.fileExtensions.push_back(argv[++i]);
-        }
-      } else if (arg == "-d" || arg == "--dot-folders") {
-        config.ignoreDotFolders = false;
-      } else if (arg == "-i" || arg == "--ignore") {
-        while (i + 1 < argc && argv[i + 1][0] != '-') {
-          // Check if the ignored item is a file or a folder
-          fs::path itemPath = fs::path(config.dirPath) / argv[++i];
-          if (fs::is_regular_file(itemPath)) {
-            config.ignoredFiles.push_back(itemPath.filename().string());
-          } else if (fs::is_directory(itemPath)) {
-            config.ignoredFolders.push_back(itemPath.filename().string());
-          } else {
-            std::cerr << "Warning: Ignored item '" << itemPath.string()
-                      << "' is neither a file nor a directory.\n";
-          }
-        }
-      } else if (arg == "-r" || arg == "--regex") {
-        while (i + 1 < argc && argv[i + 1][0] != '-') {
-          config.regexFilters.push_back(argv[++i]);
-        }
-      } else if (arg == "-c" || arg == "--remove-comments") {
-        config.removeComments = true;
-      } else if (arg == "-l" || arg == "--remove-empty-lines") {
-        config.removeEmptyLines = true;
-      } else if (arg == "-p" || arg == "--relative-path") {
-        config.showRelativePath = true;
-      } else if (arg == "-o" || arg == "--ordered") {
-        config.ordered = true;
-      } else if (arg == "-z" || arg == "--last") {
-        while (i + 1 < argc && argv[i + 1][0] != '-') {
-          std::string entry = argv[++i];
-          fs::path absPath = config.dirPath / entry;
-          if (fs::exists(absPath)) {
-            if (fs::is_directory(absPath)) {
-              config.lastDirs.push_back(fs::path(entry).lexically_normal());
-            } else {
-              config.lastFiles.push_back(fs::path(entry).lexically_normal());
-            }
-          } else {
-            // Treat as a file (may not exist yet)
-            config.lastFiles.push_back(fs::path(entry).lexically_normal());
-          }
-        }
-      } else if (arg == "-w" || arg == "--markdownlint-fixes") {
-        config.markdownlintFixes = true;
-      } else {
-        std::cerr << "Invalid option: " << arg << "\n";
-        return 1;
+  for (int i = 2; i < argc; ++i) {
+    std::string_view arg = argv[i];
+    if ((arg == "-m" || arg == "--max-size") && i + 1 < argc) {
+      config.maxFileSizeB = std::stoll(argv[++i]);
+    } else if (arg == "-n" || arg == "--no-recursive") {
+      config.recursiveSearch = false;
+    } else if (arg == "-e" || arg == "--ext") {
+      while (i + 1 < argc && argv[i + 1][0] != '-')
+        config.fileExtensions.emplace_back(argv[++i]);
+    } else if (arg == "-d" || arg == "--dot-folders") {
+      config.ignoreDotFolders = false;
+    } else if (arg == "-i" || arg == "--ignore") {
+      while (i + 1 < argc && argv[i + 1][0] != '-') {
+        std::string item = argv[++i];
+        // Store the ignored item as-is (do not prepend the input directory)
+        if (fs::path(item).is_absolute())
+          config.ignoredFiles.emplace_back(item);
+        else
+          config.ignoredFiles.emplace_back(item);
       }
+    } else if (arg == "-r" || arg == "--regex") {
+      while (i + 1 < argc && argv[i + 1][0] != '-')
+        config.regexFilters.emplace_back(argv[++i]);
+    } else if (arg == "-c" || arg == "--remove-comments") {
+      config.removeComments = true;
+    } else if (arg == "-l" || arg == "--remove-empty-lines") {
+      config.removeEmptyLines = true;
+    } else if (arg == "-p" || arg == "--relative-path") {
+      config.showRelativePath = true;
+    } else if (arg == "-o" || arg == "--ordered") {
+      config.ordered = true;
+    } else if (arg == "-z" || arg == "--last") {
+      while (i + 1 < argc && argv[i + 1][0] != '-') {
+        std::string entry = argv[++i];
+        // Store the entry as-is (do not prepend the input directory)
+        if (fs::is_directory(config.dirPath / entry))
+          config.lastDirs.emplace_back(fs::path(entry));
+        else
+          config.lastFiles.emplace_back(fs::path(entry));
+      }
+    } else if (arg == "-w" || arg == "--markdownlint-fixes") {
+      config.markdownlintFixes = true;
+    } else {
+      std::cerr << "Invalid option: " << arg << "\n";
+      return 1;
     }
-
-    DirectoryProcessor processor(std::move(config));
-    globalProcessor = &processor;
-
-    // Register signal handler
-    std::signal(SIGINT, signalHandler);
-
-    return processor.process() ? 0 : 1;
-
-  } catch (const std::exception &e) {
-    std::cerr << "Fatal error: " << e.what() << '\n';
-    return 1;
   }
+
+  DirectoryProcessor processor(std::move(config));
+  globalProcessor = &processor;
+  std::signal(SIGINT, signalHandler);
+  return processor.process() ? 0 : 1;
 }
