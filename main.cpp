@@ -420,23 +420,25 @@ bool DirectoryProcessor::process() {
   if (config.ordered)
     orderedResults.reserve(normalFiles.size());
 
+  if (config.markdownlintFixes)
+    printToConsole("#\n");
+
   std::vector<std::thread> threads;
   const size_t filesPerThread =
       (normalFiles.size() + threadCount - 1) / threadCount;
 
-  if (config.markdownlintFixes)
-    printToConsole("#\n");
+  for (size_t i = 0; i < threadCount; ++i) {
+    const size_t start = i * filesPerThread;
+    const size_t end = std::min((i + 1) * filesPerThread, normalFiles.size());
+    if (start >= end) {
+      break; // No more files to process
+    }
 
-  for (size_t i = 0; i < threadCount && i * filesPerThread < normalFiles.size();
-       ++i) {
-    threads.emplace_back([this, &normalFiles, &orderedResults, i,
-                          filesPerThread] {
+    threads.emplace_back([this, start, end, &normalFiles, &orderedResults] {
       try {
-        processFileChunk(
-            std::span(normalFiles.begin() + i * filesPerThread,
-                      std::min(normalFiles.begin() + (i + 1) * filesPerThread,
-                               normalFiles.end())),
-            orderedResults);
+        const auto chunkBegin = normalFiles.begin() + start;
+        const auto chunkEnd = normalFiles.begin() + end;
+        processFileChunk(std::span{chunkBegin, chunkEnd}, orderedResults);
       } catch (const std::exception &e) {
         logError("Exception in thread: " + std::string(e.what()));
       }
