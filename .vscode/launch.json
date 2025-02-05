@@ -1,0 +1,13 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug",
+            "program": "${workspaceFolder}/build/dircat.exe",
+            "args": ["../", "-d", "-c", "-l", "-p", "-o", "-w", "-m", "1024", "-e", "txt", "md", "cpp", "yml", "-i", "LICENSE", "-z", ".github", "main.cpp"],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
