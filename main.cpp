@@ -20,8 +20,8 @@ struct Config {
   bool recursiveSearch = true;
   std::vector<std::string> fileExtensions;
   bool ignoreDotFolders = true;
-  std::vector<std::string> ignoredFolders;
-  std::vector<std::string> ignoredFiles;
+  std::vector<fs::path> ignoredFolders;
+  std::vector<fs::path> ignoredFiles;
   std::vector<std::string> regexFilters;
   bool removeComments = false;
   bool removeEmptyLines = false;
@@ -90,20 +90,34 @@ bool DirectoryProcessor::isFileExtensionAllowed(const fs::path &path) const {
 }
 
 bool DirectoryProcessor::shouldIgnoreFolder(const fs::path &path) const {
-  if (config.ignoreDotFolders && path.filename().string().front() == '.')
+  if (config.ignoreDotFolders && path.filename().string().front() == '.') {
     return true;
-  return std::find(config.ignoredFolders.begin(), config.ignoredFolders.end(),
-                   path.filename().string()) != config.ignoredFolders.end();
+  }
+
+  fs::path relativePath;
+  try {
+    relativePath = fs::relative(path, config.dirPath);
+  } catch (const std::exception &e) {
+    logError("Error getting relative path for " + path.string() + ": " +
+             e.what());
+    return false;
+  }
+
+  for (const auto &ignoredFolder : config.ignoredFolders) {
+    if (relativePath.string().find(ignoredFolder.string()) == 0) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 bool DirectoryProcessor::shouldIgnoreFile(const fs::path &path) const {
-  const auto filename = path.filename().string();
-  const auto relativePath = fs::relative(path, config.dirPath).string();
+  fs::path relativePath =
+      fs::relative(path, config.dirPath); // Get relative path
 
-  // Check ignoredFiles list for either the filename or the relative path
+  // Check ignoredFiles list for the relative path
   return std::find(config.ignoredFiles.begin(), config.ignoredFiles.end(),
-                   filename) != config.ignoredFiles.end() ||
-         std::find(config.ignoredFiles.begin(), config.ignoredFiles.end(),
                    relativePath) != config.ignoredFiles.end();
 }
 
@@ -212,37 +226,49 @@ std::vector<fs::path> DirectoryProcessor::collectFiles() {
                        });
   };
 
-  auto processEntry = [&](const auto &entry) {
-    if (shouldStop)
-      return;
-    if (fs::is_directory(entry) && shouldIgnoreFolder(entry.path())) {
-      if (config.recursiveSearch)
-        fs::recursive_directory_iterator(entry).disable_recursion_pending();
-      return;
-    }
-
-    if (fs::is_regular_file(entry) && isFileExtensionAllowed(entry) &&
-        !shouldIgnoreFile(entry.path()) && !matchesRegexFilters(entry.path())) {
-      if (isLastFile(entry.path())) {
-        if (lastFilesSet.insert(entry.path()).second)
-          lastFilesList.push_back(entry.path());
-      } else {
-        normalFiles.push_back(entry.path());
-      }
-    }
+  auto shouldSkipDirectory = [&](const fs::path &dirPath) {
+    return fs::is_directory(dirPath) && shouldIgnoreFolder(dirPath);
   };
 
   try {
     auto options = fs::directory_options::skip_permission_denied;
 
     if (config.recursiveSearch) {
-      for (auto &entry :
-           fs::recursive_directory_iterator(config.dirPath, options)) {
-        processEntry(entry);
+      fs::recursive_directory_iterator it(config.dirPath, options);
+      while (it != fs::recursive_directory_iterator()) {
+        if (shouldStop) {
+          return normalFiles;
+        }
+        if (shouldSkipDirectory(it->path())) {
+          it.disable_recursion_pending();
+        } else if (fs::is_regular_file(it->path()) &&
+                   isFileExtensionAllowed(it->path()) &&
+                   !shouldIgnoreFile(it->path()) &&
+                   !matchesRegexFilters(it->path())) {
+          if (isLastFile(it->path())) {
+            if (lastFilesSet.insert(it->path()).second) {
+              lastFilesList.push_back(it->path());
+            }
+          } else {
+            normalFiles.push_back(it->path());
+          }
+        }
+        ++it;
       }
     } else {
       for (auto &entry : fs::directory_iterator(config.dirPath, options)) {
-        processEntry(entry);
+        if (shouldStop)
+          return normalFiles;
+        if (fs::is_regular_file(entry) && isFileExtensionAllowed(entry) &&
+            !shouldIgnoreFile(entry.path()) &&
+            !matchesRegexFilters(entry.path())) {
+          if (isLastFile(entry.path())) {
+            if (lastFilesSet.insert(entry.path()).second)
+              lastFilesList.push_back(entry.path());
+          } else {
+            normalFiles.push_back(entry.path());
+          }
+        }
       }
     }
   } catch (const fs::filesystem_error &e) {
@@ -516,12 +542,23 @@ int main(int argc, char *argv[]) {
       config.ignoreDotFolders = false;
     } else if (arg == "-i" || arg == "--ignore") {
       while (i + 1 < argc && argv[i + 1][0] != '-') {
-        std::string item = argv[++i];
-        // Store the ignored item as-is (do not prepend the input directory)
-        if (fs::path(item).is_absolute())
-          config.ignoredFiles.emplace_back(item);
-        else
-          config.ignoredFiles.emplace_back(item);
+        std::string entry = argv[++i];
+        fs::path absoluteEntry = fs::absolute(config.dirPath / entry);
+        //  Store relative paths (relative to config.dirPath)
+        if (fs::is_directory(absoluteEntry)) {
+          // Check if ignored folder is under dirPath
+          try {
+            fs::path relativeEntry =
+                fs::relative(absoluteEntry, config.dirPath);
+            config.ignoredFolders.emplace_back(relativeEntry);
+          } catch (const std::exception &e) {
+            std::cerr << "Invalid ignore path: " << absoluteEntry
+                      << " is not under " << config.dirPath << '\n';
+            return 1;
+          }
+        } else {
+          config.ignoredFiles.emplace_back(entry);
+        }
       }
     } else if (arg == "-r" || arg == "--regex") {
       while (i + 1 < argc && argv[i + 1][0] != '-')
@@ -537,11 +574,15 @@ int main(int argc, char *argv[]) {
     } else if (arg == "-z" || arg == "--last") {
       while (i + 1 < argc && argv[i + 1][0] != '-') {
         std::string entry = argv[++i];
-        // Store the entry as-is (do not prepend the input directory)
-        if (fs::is_directory(config.dirPath / entry))
-          config.lastDirs.emplace_back(fs::path(entry));
-        else
-          config.lastFiles.emplace_back(fs::path(entry));
+        fs::path relativeEntry =
+            fs::weakly_canonical(fs::path(entry)); // Normalize path
+        if (fs::is_directory(config.dirPath / relativeEntry)) {
+          config.lastDirs.emplace_back(
+              fs::relative(config.dirPath / relativeEntry, config.dirPath));
+        } else {
+          config.lastFiles.emplace_back(
+              fs::relative(config.dirPath / relativeEntry, config.dirPath));
+        }
       }
     } else if (arg == "-w" || arg == "--markdownlint-fixes") {
       config.markdownlintFixes = true;
