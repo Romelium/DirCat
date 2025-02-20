@@ -670,45 +670,51 @@ void signalHandler(int signum) {
 Config parse_arguments(int argc, char *argv[]) {
   Config config;
 
-  config.disableMarkdownlintFixes =
-      false;                       // default is markdownlint fixes enabled
-  config.showFilenameOnly = false; // default is relative path shown
-  config.disableGitignore = false; // default is gitignore enabled
-  config.unorderedOutput = false;  // default is ordered output
-  config.onlyLast = false;         // default is not only-last mode
-
   if (argc < 2) {
-    std::cerr
-        << "Usage: " << argv[0] << " <directory_path> [options]\n"
-        << "Options:\n"
-        << "  -m, --max-size <bytes>  Maximum file size in bytes (default: no "
-           "limit)\n"
-        << "  -n, --no-recursive     Disable recursive search\n"
-        << "  -e, --ext <ext>        Process only files with given extension "
-           "(can be used multiple times, grouped)\n"
-        << "  -x, --exclude-ext <ext> Exclude files with given extension "
-           "(can be used multiple times, grouped)\n" // New option
-        << "  -d, --dot-folders      Include folders starting with a dot\n"
-        << "  -i, --ignore <item>    Ignore specific folder or file (can be "
-           "used multiple times, grouped)\n"
-        << "  -r, --regex <pattern>  Exclude files matching the regex pattern "
-           "(can be used multiple times, grouped)\n"
-        << "  -c, --remove-comments  Remove C++ style comments (// and /* */) "
-           "from code\n"
-        << "  -l, --remove-empty-lines Remove empty lines from output\n"
-        << "  -f, --filename-only      Show only filename in file headers\n"
-        << "  -u, --unordered          Output files in unordered they were "
-           "found\n"
-        << "  -z, --last <item>      Process specified file, directory, or "
-           "filename last (order of multiple -z options is preserved).\n"
-        << "  -Z, --only-last         Only process specified files and "
-           "directories from --last options, ignoring all other files.\n"
-        << "  -w, --no-markdownlint-fixes Disable fixes for Markdown linting\n"
-        << "  -t, --no-gitignore         Disable gitignore rules\n"
-        << "  -g, --gitignore <path>     Use gitignore rules from a specific "
-           "path.\n";
+    std::cerr << "Usage: " << argv[0] << " <directory_path> [options]\n";
+    std::cerr << "Options:\n";
 
-    exit(1); // Exit immediately on usage error.
+    std::vector<std::pair<std::string, std::string>> options = {
+        {"-m, --max-size <bytes>",
+         "Maximum file size in bytes (default: no limit)"},
+        {"-n, --no-recursive", "Disable recursive search"},
+        {"-e, --ext <ext>", "Process only files with given extension (can be "
+                            "used multiple times, grouped)"},
+        {"-x, --exclude-ext <ext>", "Exclude files with given extension (can "
+                                    "be used multiple times, grouped)"},
+        {"-d, --dot-folders", "Include folders starting with a dot"},
+        {"-i, --ignore <item>", "Ignore specific folder or file (can be used "
+                                "multiple times, grouped)"},
+        {"-r, --regex <pattern>", "Exclude files matching the regex pattern "
+                                  "(can be used multiple times, grouped)"},
+        {"-c, --remove-comments",
+         "Remove C++ style comments (// and /* */) from code"},
+        {"-l, --remove-empty-lines", "Remove empty lines from output"},
+        {"-f, --filename-only", "Show only filename in file headers"},
+        {"-u, --unordered", "Output files in unordered they were found"},
+        {"-z, --last <item>",
+         "Process specified file, directory, or filename last (order of "
+         "multiple -z options is preserved)."},
+        {"-Z, --only-last", "Only process specified files and directories from "
+                            "--last options, ignoring all other files."},
+        {"-w, --no-markdownlint-fixes", "Disable fixes for Markdown linting"},
+        {"-t, --no-gitignore", "Disable gitignore rules"},
+        {"-g, --gitignore <path>", "Use gitignore rules from a specific path."},
+    };
+
+    size_t max_option_length = 0;
+    for (const auto &option : options) {
+      if (option.first.length() > max_option_length) {
+        max_option_length = option.first.length();
+      }
+    }
+
+    for (const auto &option : options) {
+      std::cerr << "  " << std::left << std::setw(max_option_length)
+                << option.first << "  " << option.second << "\n";
+    }
+
+    exit(1);
   }
 
   config.dirPath = argv[1];
