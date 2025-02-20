@@ -11,6 +11,7 @@
 #include <thread>
 #include <unordered_set>
 #include <vector>
+#include <string_view>
 
 namespace fs = std::filesystem;
 
@@ -41,14 +42,17 @@ struct Config {
 // --- Utility Functions ---
 
 // Helper function to trim whitespace from a string
-std::string trim(const std::string &str) {
-  size_t first = str.find_first_not_of(' ');
-  if (std::string::npos == first) {
-    return str;
+std::string trim(std::string_view str) {
+    constexpr std::string_view whitespace = " \t\n\r\f\v"; // All standard whitespace
+  
+    size_t start = str.find_first_not_of(whitespace);
+    if (start == std::string_view::npos) {
+      return ""; // String contains only whitespace
+    }
+  
+    size_t end = str.find_last_not_of(whitespace);
+    return std::string(str.substr(start, end - start + 1));
   }
-  size_t last = str.find_last_not_of(' ');
-  return str.substr(first, (last - first + 1));
-}
 
 // Loads gitignore rules from a file
 std::vector<std::string> load_gitignore_rules(const fs::path &gitignore_path) {
