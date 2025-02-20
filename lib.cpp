@@ -513,9 +513,6 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
           << config.gitignorePath << ". Ignoring gitignore.\n";
       config.disableGitignore = true; // Disable gitignore if file not found and
                                       // option used.
-    } else if (!config.disableGitignore && !config.gitignoreRules.empty()) {
-      std::cout << "Using gitignore rules from: " << config.gitignorePath
-                << "\n";
     }
   }
 
