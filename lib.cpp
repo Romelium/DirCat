@@ -151,17 +151,17 @@ bool is_file_size_valid(const fs::path &path,
 }
 
 // Checks if a file's extension is allowed (and not excluded).
-bool is_file_extension_allowed(const fs::path &path,
-                               const std::vector<std::string> &extensions,
-                               const std::vector<std::string> &excludedExtensions) {
+bool is_file_extension_allowed(
+    const fs::path &path, const std::vector<std::string> &extensions,
+    const std::vector<std::string> &excludedExtensions) {
   const auto ext = path.extension().string();
   if (ext.empty())
     return false;
   const std::string ext_no_dot = ext.substr(1);
 
   // Check for excluded extensions first
-  if (std::find(excludedExtensions.begin(), excludedExtensions.end(), ext_no_dot) !=
-      excludedExtensions.end()) {
+  if (std::find(excludedExtensions.begin(), excludedExtensions.end(),
+                ext_no_dot) != excludedExtensions.end()) {
     return false; // Extension is explicitly excluded
   }
 
@@ -171,7 +171,6 @@ bool is_file_extension_allowed(const fs::path &path,
   return std::find(extensions.begin(), extensions.end(), ext_no_dot) !=
          extensions.end(); // Check if extension is in allowed list
 }
-
 
 // Checks if a folder should be ignored.
 bool should_ignore_folder(const fs::path &path, const Config &config) {
@@ -366,43 +365,56 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
 
   if (config.onlyLast) {
     if (config.lastFiles.empty() && config.lastDirs.empty()) {
-        std::cerr << "ERROR: --only-last option used but no files or directories were specified with --last. Nothing to process.\n";
-        exit(1);
+      std::cerr << "ERROR: --only-last option used but no files or directories "
+                   "were specified with --last. Nothing to process.\n";
+      exit(1);
     }
-    for (const auto& lastFile : config.lastFiles) {
+    for (const auto &lastFile : config.lastFiles) {
       fs::path absPath = fs::absolute(config.dirPath / lastFile);
       if (fs::exists(absPath) && fs::is_regular_file(absPath)) {
         if (lastFilesSet.insert(absPath).second) {
           lastFilesList.push_back(absPath);
         }
       } else {
-        std::cerr << "ERROR: --only-last specified file not found or not a regular file: " << absPath << '\n';
+        std::cerr << "ERROR: --only-last specified file not found or not a "
+                     "regular file: "
+                  << absPath << '\n';
         exit(1);
       }
     }
-    for (const auto& lastDir : config.lastDirs) {
+    for (const auto &lastDir : config.lastDirs) {
       fs::path absDirPath = fs::absolute(config.dirPath / lastDir);
       if (fs::exists(absDirPath) && fs::is_directory(absDirPath)) {
-        fs::recursive_directory_iterator it(absDirPath, fs::directory_options::skip_permission_denied);
+        fs::recursive_directory_iterator it(
+            absDirPath, fs::directory_options::skip_permission_denied);
         fs::recursive_directory_iterator end;
         for (; it != end && !should_stop; ++it) {
           if (fs::is_regular_file(it->path()) &&
-              is_file_extension_allowed(it->path(), config.fileExtensions, config.excludedFileExtensions) && // Apply extension filter even in onlyLast mode
-              !should_ignore_file(it->path(), config) && // Apply ignore file filter even in onlyLast mode
-              !matches_regex_filters(it->path(), config.regexFilters)) { // Apply regex filter even in onlyLast mode
-             if (lastFilesSet.insert(it->path()).second) {
-                lastFilesList.push_back(it->path());
-              }
+              is_file_extension_allowed(
+                  it->path(), config.fileExtensions,
+                  config.excludedFileExtensions) && // Apply extension filter
+                                                    // even in onlyLast mode
+              !should_ignore_file(
+                  it->path(),
+                  config) && // Apply ignore file filter even in onlyLast mode
+              !matches_regex_filters(
+                  it->path(), config.regexFilters)) { // Apply regex filter even
+                                                      // in onlyLast mode
+            if (lastFilesSet.insert(it->path()).second) {
+              lastFilesList.push_back(it->path());
+            }
           }
         }
       } else {
-        std::cerr << "ERROR: --only-last specified directory not found or not a directory: " << absDirPath << '\n';
+        std::cerr << "ERROR: --only-last specified directory not found or not "
+                     "a directory: "
+                  << absDirPath << '\n';
         exit(1);
       }
     }
-    return {normalFiles, lastFilesList}; // normalFiles is empty when onlyLast is true
+    return {normalFiles,
+            lastFilesList}; // normalFiles is empty when onlyLast is true
   }
-
 
   try {
     auto options = fs::directory_options::skip_permission_denied;
@@ -418,7 +430,8 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
           continue;
         }
         if (fs::is_regular_file(it->path()) &&
-            is_file_extension_allowed(it->path(), config.fileExtensions, config.excludedFileExtensions) &&
+            is_file_extension_allowed(it->path(), config.fileExtensions,
+                                      config.excludedFileExtensions) &&
             !should_ignore_file(it->path(), config) &&
             !matches_regex_filters(it->path(), config.regexFilters)) {
           if (is_last_file(it->path(), config)) {
@@ -439,7 +452,8 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
           continue;
         }
         if (fs::is_regular_file(it->path()) &&
-            is_file_extension_allowed(it->path(), config.fileExtensions, config.excludedFileExtensions) &&
+            is_file_extension_allowed(it->path(), config.fileExtensions,
+                                      config.excludedFileExtensions) &&
             !should_ignore_file(it->path(), config) &&
             !matches_regex_filters(it->path(), config.regexFilters)) {
           if (is_last_file(it->path(), config)) {
@@ -571,9 +585,10 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
 
   auto [normalFiles, lastFilesList] = collect_files(config, should_stop);
 
-  if (normalFiles.empty() && lastFilesList.empty() ) {
+  if (normalFiles.empty() && lastFilesList.empty()) {
     if (!config.onlyLast) {
-        std::cout << "No matching files found in: " << config.dirPath.string() << "\n";
+      std::cout << "No matching files found in: " << config.dirPath.string()
+                << "\n";
     }
     return true;
   }
@@ -655,39 +670,43 @@ void signalHandler(int signum) {
 Config parse_arguments(int argc, char *argv[]) {
   Config config;
 
-  config.disableMarkdownlintFixes = false; // default is markdownlint fixes enabled
-  config.showFilenameOnly = false;        // default is relative path shown
-  config.disableGitignore = false;        // default is gitignore enabled
-  config.unorderedOutput = false;         // default is ordered output
-  config.onlyLast = false;                // default is not only-last mode
+  config.disableMarkdownlintFixes =
+      false;                       // default is markdownlint fixes enabled
+  config.showFilenameOnly = false; // default is relative path shown
+  config.disableGitignore = false; // default is gitignore enabled
+  config.unorderedOutput = false;  // default is ordered output
+  config.onlyLast = false;         // default is not only-last mode
 
   if (argc < 2) {
-    std::cerr << "Usage: " << argv[0] << " <directory_path> [options]\n"
-              << "Options:\n"
-              << "  -m, --max-size <bytes>  Maximum file size in bytes (default: no "
-                 "limit)\n"
-              << "  -n, --no-recursive     Disable recursive search\n"
-              << "  -e, --ext <ext>        Process only files with given extension "
-                 "(can be used multiple times, grouped)\n"
-              << "  -x, --exclude-ext <ext> Exclude files with given extension "
-                 "(can be used multiple times, grouped)\n" // New option
-              << "  -d, --dot-folders      Include folders starting with a dot\n"
-              << "  -i, --ignore <item>    Ignore specific folder or file (can be "
-                 "used multiple times, grouped)\n"
-              << "  -r, --regex <pattern>  Exclude files matching the regex pattern "
-                 "(can be used multiple times, grouped)\n"
-              << "  -c, --remove-comments  Remove C++ style comments (// and /* */) "
-                 "from code\n"
-              << "  -l, --remove-empty-lines Remove empty lines from output\n"
-              << "  -f, --filename-only      Show only filename in file headers\n"
-              << "  -u, --unordered          Output files in unordered they were "
-                 "found\n"
-              << "  -z, --last <item>      Process specified file, directory, or "
-                 "filename last (order of multiple -z options is preserved).\n"
-              << "  -Z, --only-last         Only process specified files and directories from --last options, ignoring all other files.\n"
-              << "  -w, --no-markdownlint-fixes Disable fixes for Markdown linting\n"
-              << "  -t, --no-gitignore         Disable gitignore rules\n"
-              << "  -g, --gitignore <path>     Use gitignore rules from a specific path.\n";
+    std::cerr
+        << "Usage: " << argv[0] << " <directory_path> [options]\n"
+        << "Options:\n"
+        << "  -m, --max-size <bytes>  Maximum file size in bytes (default: no "
+           "limit)\n"
+        << "  -n, --no-recursive     Disable recursive search\n"
+        << "  -e, --ext <ext>        Process only files with given extension "
+           "(can be used multiple times, grouped)\n"
+        << "  -x, --exclude-ext <ext> Exclude files with given extension "
+           "(can be used multiple times, grouped)\n" // New option
+        << "  -d, --dot-folders      Include folders starting with a dot\n"
+        << "  -i, --ignore <item>    Ignore specific folder or file (can be "
+           "used multiple times, grouped)\n"
+        << "  -r, --regex <pattern>  Exclude files matching the regex pattern "
+           "(can be used multiple times, grouped)\n"
+        << "  -c, --remove-comments  Remove C++ style comments (// and /* */) "
+           "from code\n"
+        << "  -l, --remove-empty-lines Remove empty lines from output\n"
+        << "  -f, --filename-only      Show only filename in file headers\n"
+        << "  -u, --unordered          Output files in unordered they were "
+           "found\n"
+        << "  -z, --last <item>      Process specified file, directory, or "
+           "filename last (order of multiple -z options is preserved).\n"
+        << "  -Z, --only-last         Only process specified files and "
+           "directories from --last options, ignoring all other files.\n"
+        << "  -w, --no-markdownlint-fixes Disable fixes for Markdown linting\n"
+        << "  -t, --no-gitignore         Disable gitignore rules\n"
+        << "  -g, --gitignore <path>     Use gitignore rules from a specific "
+           "path.\n";
 
     exit(1); // Exit immediately on usage error.
   }
@@ -775,7 +794,7 @@ Config parse_arguments(int argc, char *argv[]) {
         }
       }
     } else if (arg == "-Z" || arg == "--only-last") {
-        config.onlyLast = true;
+      config.onlyLast = true;
     } else if (arg == "-w" || arg == "--no-markdownlint-fixes") {
       config.disableMarkdownlintFixes = true;
     } else if (arg == "-t" || arg == "--no-gitignore") {
@@ -783,13 +802,15 @@ Config parse_arguments(int argc, char *argv[]) {
     } else if (arg == "-g" || arg == "--gitignore") {
       config.disableGitignore = false; // Explicitly enable gitignore
       if (i + 1 >= argc || argv[i + 1][0] == '-') {
-        std::cerr << "ERROR: --gitignore option requires a path to the gitignore file.\n";
+        std::cerr << "ERROR: --gitignore option requires a path to the "
+                     "gitignore file.\n";
         exit(1);
       }
       config.gitignorePath = argv[++i];
       if (!fs::exists(config.gitignorePath)) {
         std::cerr << "WARNING: Gitignore file not found at: "
-                  << config.gitignorePath << ". Using gitignore might not work as expected.\n";
+                  << config.gitignorePath
+                  << ". Using gitignore might not work as expected.\n";
       }
     } else {
       std::cerr << "Invalid option: " << arg << "\n";
