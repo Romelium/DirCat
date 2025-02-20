@@ -278,7 +278,7 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
           if (shouldSkipDirectory(it->path())) { // Bug fix: Check for ignored folders in non-recursive mode
               continue;
           }
-            if (fs::is_regular_file(it->path()) &&
+          if (fs::is_regular_file(it->path()) &&
               is_file_extension_allowed(it->path(), config.fileExtensions) &&
               !should_ignore_file(it->path(), config) &&
               !matches_regex_filters(it->path(), config.regexFilters)) {
@@ -288,7 +288,7 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
             } else {
                 normalFiles.push_back(it->path());
             }
-            }
+          }
       }
     }
 
@@ -537,9 +537,9 @@ Config parse_arguments(int argc, char *argv[]) {
                 fs::relative(absoluteEntry, config.dirPath);
             config.ignoredFolders.emplace_back(relativeEntry);
           } catch (const std::exception &e) {
-            std::cerr << "Invalid ignore path: " << absoluteEntry
+            std::cerr << "ERROR: Invalid ignore path: " << absoluteEntry
                       << " is not under " << config.dirPath << '\n';
-            return config; // Bug fix: Return config instead of exit
+            exit(1); // Fixed: Exit on invalid ignore path
           }
         } else {
           config.ignoredFiles.emplace_back(entry);
@@ -564,7 +564,8 @@ Config parse_arguments(int argc, char *argv[]) {
         try {
             relativeEntry = fs::relative(absoluteEntry, config.dirPath); // Then make relative
         } catch (const std::exception& e) {
-            relativeEntry = absoluteEntry; // If relative fails, use absolute. Should not happen normally if under dirPath, but to be safe.
+            std::cerr << "ERROR: Invalid last path: " << absoluteEntry << " is not under " << config.dirPath << '\n';
+            exit(1); // Fixed: Exit if last path is not under dirPath
         }
 
         if (fs::is_directory(absoluteEntry)) { // Corrected line: Check absoluteEntry
