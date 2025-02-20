@@ -1,6 +1,6 @@
 # DirCat
 
-DirCat is a high-performance C++ utility that concatenates and displays the contents of files in a directory, similar to the Unix `cat` command but for entire directories. It supports multi-threaded processing, recursive directory traversal, and filtering options.
+DirCat is a high-performance C++ utility that concatenates and displays the contents of files in a directory, similar to the Unix `cat` command but for entire directories. It supports multi-threaded processing, recursive directory traversal, file filtering, and various output formatting options.
 
 ## Usage
 
@@ -10,18 +10,22 @@ DirCat is a high-performance C++ utility that concatenates and displays the cont
 
 ### Options
 
-- `-m, --max-size <bytes>`: Maximum file size in bytes (no limit by default)
-- `-n, --no-recursive`: Disable recursive directory search
-- `-e, --ext <ext>`: Process only files with the specified extension (can be used multiple times and grouped)
-- `-d, --dot-folders`: Include folders starting with a dot (ignored by default)
-- `-i, --ignore <item>`: Ignore specific folder or file (can be used multiple times and grouped)
-- `-r, --regex <pattern>`: Exclude files matching the regex pattern (can be used multiple times and grouped)
+- `-m, --max-size <bytes>`: Maximum file size in bytes (no limit by default).
+- `-n, --no-recursive`: Disable recursive directory search.
+- `-e, --ext <ext>`: Process only files with the specified extension (can be used multiple times, grouped).
+- `-x, --exclude-ext <ext>`: Exclude files with the specified extension (can be used multiple times, grouped).
+- `-d, --dot-folders`: Include folders starting with a dot (ignored by default).
+- `-i, --ignore <item>`: Ignore specific folders or files (can be used multiple times, grouped).  Paths are relative to the input directory.
+- `-r, --regex <pattern>`: Exclude files matching the regex pattern (can be used multiple times, grouped). Applies to filenames only.
 - `-c, --remove-comments`: Remove C++ style comments (`//` and `/* ... */`) from the output.
-- `-l, --remove-empty-lines`: Remove empty lines from the output
-- `-p, --relative-path`: Show relative path in file headers instead of filename
-- `-o, --ordered`: Output files in the order they were found (by default, multi-threading may cause files to be output in a different order)
-- `-z, --last <item>`:  Process specified file or directory last. The order of multiple `-z` options is strictly preserved. When a directory is specified, all files within it (and its subdirectories if recursion is enabled) will be processed after other files, maintaining the relative order specified by multiple `-z` arguments. You can specify a directory path, an exact filename (relative path), or just the filename itself.
-- `-w, --markdownlint-fixes`: Apply basic Markdown linting fixes to the output (compatible with markdownlint format)
+- `-l, --remove-empty-lines`: Remove empty lines from the output.
+- `-f, --filename-only`: Show only the filename in file headers (default is relative path).
+- `-u, --unordered`: Output files as they are processed (potentially faster, but order is not guaranteed).  This is the default if `-z` is not used.
+- `-z, --last <item>`: Process specified file or directory last.  The order of multiple `-z` options is strictly preserved. When a directory is specified, all files within it (and its subdirectories if recursion is enabled) will be processed after other files, maintaining the relative order specified by multiple `-z` arguments. You can specify a directory path, an exact filename (relative path), or just the filename itself.  Paths are relative to the input directory.
+- `-Z, --only-last`: Only process the files and directories specified by the `-z` option.  Implies `-u`.  Requires at least one `-z` argument.
+- `-w, --no-markdownlint-fixes`: Disable fixes for Markdown linting (enabled by default).
+- `-t, --no-gitignore`: Disable gitignore rules.
+- `-g, --gitignore <path>`: Use gitignore rules from a specific path (defaults to `<directory_path>/.gitignore`).
 
 ### Examples
 
@@ -73,6 +77,12 @@ Process only files with extensions `cpp`, `h`, and `hpp`:
 ./dircat . -e cpp h hpp
 ```
 
+Exclude `.min.js` files, but include other `.js` files.
+
+```bash
+./dircat . -e js -x min.js
+```
+
 Remove C++ comments from the output:
 
 ```bash
@@ -91,16 +101,16 @@ Remove C++ comments and empty lines from the output:
 ./dircat . -c -l
 ```
 
-Show relative paths in the output:
+Show only filenames in the output (no paths):
 
 ```bash
-./dircat . -p
+./dircat . -f
 ```
 
-Output files in the order they are found:
+Output files in an unordered fashion (may be faster):
 
 ```bash
-./dircat . -o
+./dircat . -u
 ```
 
 Process `main.cpp` and `utils.h` last, in that order:
@@ -109,71 +119,80 @@ Process `main.cpp` and `utils.h` last, in that order:
 ./dircat . -z main.cpp utils.h
 ```
 
-Process all files, output them in order, and process `notes.txt` last:
+Process all files, output them in the order discovered, and process `notes.txt` last:
 
 ```bash
-./dircat . -o -z notes.txt
+./dircat . -z notes.txt
 ```
 
-**NEW:** Process all files, then the contents of the `src` directory, and finally `main.cpp`:
+Process the contents of the `src` directory, and finally `main.cpp`:
 
 ```bash
 ./dircat . -z src main.cpp
 ```
 
-**NEW:** Process `helper.h` last, even if other files match the `src` directory processing:
+Process `helper.h` last, even if other files match the `src` directory processing:
 
 ```bash
 ./dircat . -z src helper.h
 ```
 
-**NEW:** Process all `.cpp` files in the `src/utils` directory last, maintaining their order within the directory:
+Process all `.cpp` files in the `src/utils` directory last, maintaining their order within the directory:
 
 ```bash
 ./dircat . -e cpp -z src/utils
 ```
 
-Apply Markdown linting fixes:
+*Only* process `main.cpp` and `utils.h` (nothing else):
+
+```bash
+./dircat . -Z -z main.cpp utils.h
+```
+
+Disable Markdown linting fixes:
 
 ```bash
 ./dircat . -w
 ```
 
-Apply Markdown linting fixes, remove comments, and order output:
+Disable Markdown linting fixes, remove comments:
 
 ```bash
-./dircat . -w -c -o
+./dircat . -w -c
 ```
 
-Example of what I'm currently using in large C# projects:
+Disable gitignore processing:
 
 ```bash
-./dircat ./working-folder -e cs -l -p -o -w -z working-file-deps.cs working-file.cs 
+./dircat . -t
+```
+
+Use a specific gitignore file:
+
+```bash
+./dircat . -g /path/to/.gitignore
+```
+
+Example of usage in large C# projects (removing empty lines and comments, and processing specific files last):
+
+```bash
+./dircat ./working-folder -e cs -l -c -z working-file-deps.cs working-file.cs
 ```
 
 ## Output Format
 
-Files are output in the following format:
+Files are output in the following format (with Markdown linting fixes, which are enabled by default):
 
 ````md
-### File: filename.ext
+#
+
+## File: relative/path/to/filename.ext
+
 ```ext
 [file contents]
 ````
 
-Or, if `-p` is used:
-
-````md
-### File: relative/path/to/filename.ext
-```ext
-[file contents]
-````
-
-If `-w` (markdownlint fixes) is used, the output format changes slightly:
-
-- The `###` is reduced to `##`
-- There will be empty line after header
-- There will be top-level `#` at the beginning
+If `-f` (filename only) is used:
 
 ````md
 #
@@ -184,24 +203,35 @@ If `-w` (markdownlint fixes) is used, the output format changes slightly:
 [file contents]
 ````
 
+If `-w` (no Markdown linting fixes) is used, the output format is:
+
+````md
+### File: relative/path/to/filename.ext
+
+```ext
+[file contents]
+```
+````
+
 ## Features
 
-- Multi-threaded file processing for improved performance
-- Recursive directory traversal (optional)
-- File extension filtering
-- Maximum file size limiting
-- Ignore specific folders
-- Ignore specific files
-- Regular expression filtering for excluding files
-- Option to remove C++ style comments
-- Option to remove empty lines
-- Option to show relative paths
-- Option to enforce output order
-- option to process specific files or directories last, in specified order
-- Option to apply basic Markdown linting fixes
-- Formatted output with file names and syntax highlighting markers
-- Graceful interrupt handling
-- Memory-efficient streaming of large files
+- **Multi-threaded file processing:** Improves performance by processing multiple files concurrently.
+- **Recursive directory traversal:**  Optionally processes files in subdirectories.
+- **File extension filtering:**  Includes or excludes files based on their extensions.
+- **Maximum file size limiting:**  Skips files larger than a specified size.
+- **Ignore specific folders and files:**  Excludes specified paths from processing.
+- **Regular expression filtering:** Excludes files based on filename patterns.
+- **Comment removal:**  Removes C++ style comments (`//` and `/* ... */`).
+- **Empty line removal:**  Removes blank lines from the output.
+- **Filename-only output:**  Displays only filenames instead of relative paths.
+- **Unordered output:**  Outputs files as they are processed, potentially improving speed.
+- **Process last:**  Processes specific files and directories last, in the order specified.
+- **Only last:** Process only the files/directories specified with `--last`.
+- **Markdown linting fixes:**  Formats the output to be compatible with Markdown linters.
+- **Gitignore support:**  Respects `.gitignore` rules for ignoring files and directories.
+- **Formatted output:**  Includes file headers and syntax highlighting markers.
+- **Graceful interrupt handling:**  Handles Ctrl+C gracefully.
+- **Memory-efficient:**  Streams large files to avoid loading them entirely into memory.
 
 ## Requirements
 
@@ -211,55 +241,56 @@ If `-w` (markdownlint fixes) is used, the output format changes slightly:
 
 ## Building
 
-To build DirCat, you will need to have CMake and a C++20 compatible compiler installed on your system. Follow these steps to build the project:
+1. **Clone the repository:**
 
-1. Clone the repository:
+    ```bash
+    git clone https://github.com/romelium/dircat.git
+    cd dircat
+    ```
 
-   ```bash
-   git clone https://github.com/romelium/dircat.git
-   cd dircat
-   ```
+2. **Create a build directory:**
 
-2. Create a build directory and navigate into it:
+    ```bash
+    mkdir build
+    cd build
+    ```
 
-   ```bash
-   mkdir build
-   cd build
-   ```
+3. **Configure with CMake:**
 
-3. Run CMake to configure the project:
+    ```bash
+    cmake .. -DCMAKE_BUILD_TYPE=Release
+    ```
 
-   ```bash
-   cmake .. -DCMAKE_BUILD_TYPE=Release
-   ```
+4. **Build:**
 
-4. Build the project:
+    ```bash
+    cmake --build . --config Release
+    ```
 
-   ```bash
-   cmake --build . --config Release
-   ```
-
-   This will create the `dircat` executable in the `build` directory.
+    This creates the `dircat` executable in the `build` directory.
 
 ## Implementation Details
 
-- Uses modern C++ features including filesystem, threading, atomic operations, and regular expressions.
-- Limits maximum thread count to 8 or hardware concurrency, whichever is lower.
+- Uses modern C++ features, including `<filesystem>`, `<thread>`, `<atomic>`, and `<regex>`.
+- Limits the maximum number of threads to 8 or the hardware concurrency, whichever is lower.
 - Processes files in chunks for memory efficiency.
-- Optionally maintains consistent output ordering using sorting after multi-threaded processing.
+- When ordered output is required, sorts results after multi-threaded processing.
 - Handles large files efficiently through buffered reading.
-- Removes comments by tracking if the current character is within a string, character literal, single-line comment, or multi-line comment.
-- Removes empty lines by checking if a line contains only whitespace characters.
-- Supports processing specific files and directories last in the user-specified order, even when general ordering is not enabled.
+- Removes comments by tracking whether the current position is within a string, character literal, single-line comment, or multi-line comment.
+- Removes empty lines by checking if a line contains only whitespace.
+- Supports processing specific files/directories last, in the specified order.
+- Implements gitignore rule matching with support for wildcards, negation, and directory-specific rules.
 
 ## Error Handling
 
-- Graceful handling of permission denied errors.
-- Skips files exceeding size limit.
-- Thread-safe error logging.
-- Signal handling for clean interruption.
+- Handles permission denied errors gracefully.
+- Skips files exceeding the size limit.
+- Uses thread-safe error logging.
+- Handles interrupts (Ctrl+C) cleanly.
 - Reports invalid regular expressions.
-- Robust thread synchronization to prevent crashes with the ordered option.
+- Uses robust thread synchronization to prevent race conditions.
+- Reports errors if `--only-last` is used without any `--last` arguments, or if specified files/directories don't exist.
+- Provides clear error messages for invalid arguments and options.
 
 ## License
 
