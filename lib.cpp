@@ -8,10 +8,10 @@
 #include <span>
 #include <sstream>
 #include <string> // Make sure to include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_set>
 #include <vector>
-#include <string_view>
 
 namespace fs = std::filesystem;
 
@@ -43,16 +43,17 @@ struct Config {
 
 // Helper function to trim whitespace from a string
 std::string trim(std::string_view str) {
-    constexpr std::string_view whitespace = " \t\n\r\f\v"; // All standard whitespace
-  
-    size_t start = str.find_first_not_of(whitespace);
-    if (start == std::string_view::npos) {
-      return ""; // String contains only whitespace
-    }
-  
-    size_t end = str.find_last_not_of(whitespace);
-    return std::string(str.substr(start, end - start + 1));
+  constexpr std::string_view whitespace =
+      " \t\n\r\f\v"; // All standard whitespace
+
+  size_t start = str.find_first_not_of(whitespace);
+  if (start == std::string_view::npos) {
+    return ""; // String contains only whitespace
   }
+
+  size_t end = str.find_last_not_of(whitespace);
+  return std::string(str.substr(start, end - start + 1));
+}
 
 // Loads gitignore rules from a file
 std::vector<std::string> load_gitignore_rules(const fs::path &gitignore_path) {
@@ -73,7 +74,7 @@ std::vector<std::string> load_gitignore_rules(const fs::path &gitignore_path) {
   return rules;
 }
 
-// Simple gitignore-style matching (improved wildcard and directory matching)
+// gitignore-style
 bool matches_gitignore_rule(const fs::path &path, const std::string &rule) {
   std::string path_str = path.string();
   std::string rule_str = rule;
@@ -81,39 +82,38 @@ bool matches_gitignore_rule(const fs::path &path, const std::string &rule) {
   bool negate = false;
   if (!rule_str.empty() && rule_str[0] == '!') {
     negate = true;
-    rule_str.erase(0, 1); // Remove negation prefix for matching
+    rule_str.erase(0, 1);
   }
 
-  if (rule_str.back() == '/') { // Directory rule (must match directory prefix)
-    if (path_str.rfind(rule_str, 0) == 0 && fs::is_directory(path)) {
-      return !negate;
+  if (rule_str.back() ==
+      '/') { // Directory rule (prefix match, no fs::is_directory check here)
+    if (path_str.rfind(rule_str, 0) == 0) { // Just check prefix
+      return true; // Directory rule matches if path starts with rule prefix
     }
   } else if (rule_str.find('*') != std::string::npos) { // Wildcard matching
     std::regex regex_rule;
     std::string regex_pattern;
     for (char c : rule_str) {
       if (c == '*') {
-        regex_pattern += ".*"; // Match zero or more of any character
+        regex_pattern += ".*";
       } else if (c == '?') {
-        regex_pattern += "."; // Match any single character
+        regex_pattern += ".";
       } else if (c == '.') {
-        regex_pattern += "\\."; // Escape dot
+        regex_pattern += "\\.";
       } else {
         regex_pattern += c;
       }
     }
-    regex_rule =
-        std::regex("^" + regex_pattern + "$"); // Anchor to start and end
+    regex_rule = std::regex("^" + regex_pattern + "$");
     if (std::regex_match(path_str, regex_rule)) {
-      return !negate;
+      return true; // Wildcard rule matches
     }
   } else { // Exact file name matching
     if (path_str == rule_str) {
-      return !negate;
+      return true; // Exact match
     }
   }
-  return negate; // If no match, and it's a negate rule, return true
-                 // (effectively un-ignoring)
+  return false; // No match for this rule
 }
 
 bool is_path_ignored_by_gitignore(
@@ -128,18 +128,20 @@ bool is_path_ignored_by_gitignore(
   } catch (const std::exception &e) {
     std::cerr << "ERROR: Error getting relative path for gitignore check: "
               << path.string() << ": " << e.what() << '\n';
-    return false; // Or decide how to handle errors, maybe ignore?
+    return false;
   }
 
-  bool ignored = false;
+  bool ignored = false; // Start with not ignored
   for (const auto &rule : gitignore_rules) {
     if (matches_gitignore_rule(relative_path, rule)) {
-      if (rule.rfind("!", 0) == 0) { // Negation rule
-        ignored = false;             // Un-ignore if negation rule matches
+      if (rule.rfind("!", 0) == 0) { // Negation rule matched
+        ignored = false;             // Un-ignore
       } else {
-        ignored = true;
+        ignored = true; // Ignore
       }
     }
+    // If a negation rule matches, it un-ignores, otherwise it ignores.
+    // The *last matching rule* determines the final state.
   }
   return ignored;
 }
@@ -208,10 +210,12 @@ bool should_ignore_folder(const fs::path &path, const Config &config) {
 // Checks if a file should be ignored.
 bool should_ignore_file(const fs::path &path, const Config &config) {
   if (!config.disableGitignore &&
-      is_path_ignored_by_gitignore(path, config.gitignoreRules,
-                                   config.dirPath)) {
+      is_path_ignored_by_gitignore(path, config.gitignoreRules, config.dirPath))
     return true;
-  }
+
+  if (!is_file_size_valid(path, config.maxFileSizeB))
+    return true;
+
   fs::path relativePath = fs::relative(path, config.dirPath);
   return std::find(config.ignoredFiles.begin(), config.ignoredFiles.end(),
                    relativePath) != config.ignoredFiles.end();
