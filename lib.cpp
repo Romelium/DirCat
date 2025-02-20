@@ -275,7 +275,9 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
           if (should_stop) {
             return { normalFiles, lastFilesList };
           }
-
+          if (shouldSkipDirectory(it->path())) { // Bug fix: Check for ignored folders in non-recursive mode
+              continue;
+          }
             if (fs::is_regular_file(it->path()) &&
               is_file_extension_allowed(it->path(), config.fileExtensions) &&
               !should_ignore_file(it->path(), config) &&
@@ -516,8 +518,13 @@ Config parse_arguments(int argc, char *argv[]) {
     } else if (arg == "-n" || arg == "--no-recursive") {
       config.recursiveSearch = false;
     } else if (arg == "-e" || arg == "--ext") {
-      while (i + 1 < argc && argv[i + 1][0] != '-')
-        config.fileExtensions.emplace_back(argv[++i]);
+      while (i + 1 < argc && argv[i + 1][0] != '-') {
+        std::string ext = argv[++i];
+        if (!ext.empty() && ext[0] == '.') {
+          ext.erase(0, 1); // Remove leading dot if present
+        }
+        config.fileExtensions.emplace_back(ext);
+      }
     } else if (arg == "-d" || arg == "--dot-folders") {
       config.ignoreDotFolders = false;
     } else if (arg == "-i" || arg == "--ignore") {
@@ -532,7 +539,7 @@ Config parse_arguments(int argc, char *argv[]) {
           } catch (const std::exception &e) {
             std::cerr << "Invalid ignore path: " << absoluteEntry
                       << " is not under " << config.dirPath << '\n';
-            exit(1); //  consistent error handling
+            return config; // Bug fix: Return config instead of exit
           }
         } else {
           config.ignoredFiles.emplace_back(entry);
@@ -552,14 +559,18 @@ Config parse_arguments(int argc, char *argv[]) {
     } else if (arg == "-z" || arg == "--last") {
       while (i + 1 < argc && argv[i + 1][0] != '-') {
         std::string entry = argv[++i];
-        fs::path relativeEntry =
-            fs::weakly_canonical(fs::path(entry)); // Normalize path
+        fs::path absoluteEntry = fs::absolute(config.dirPath / entry); // Use absolute path first
+        fs::path relativeEntry;
+        try {
+            relativeEntry = fs::relative(absoluteEntry, config.dirPath); // Then make relative
+        } catch (const std::exception& e) {
+            relativeEntry = absoluteEntry; // If relative fails, use absolute. Should not happen normally if under dirPath, but to be safe.
+        }
+
         if (fs::is_directory(config.dirPath / relativeEntry)) {
-          config.lastDirs.emplace_back(
-              fs::relative(config.dirPath / relativeEntry, config.dirPath));
+          config.lastDirs.emplace_back(relativeEntry);
         } else {
-          config.lastFiles.emplace_back(
-              fs::relative(config.dirPath / relativeEntry, config.dirPath));
+          config.lastFiles.emplace_back(relativeEntry);
         }
       }
     } else if (arg == "-w" || arg == "--markdownlint-fixes") {
