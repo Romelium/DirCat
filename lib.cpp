@@ -26,12 +26,12 @@ struct Config {
   std::vector<std::string> regexFilters;
   bool removeComments = false;
   bool removeEmptyLines = false;
-  bool showRelativePath = false;
-  bool ordered = false;
+  bool showFilenameOnly = false;
+  bool unorderedOutput = false;
   std::vector<fs::path> lastFiles;
   std::vector<fs::path> lastDirs;
-  bool markdownlintFixes = false;
-  bool useGitignore = false;
+  bool disableMarkdownlintFixes = false;
+  bool disableGitignore = false;
   fs::path gitignorePath;
   std::vector<std::string> gitignoreRules;
 };
@@ -53,7 +53,8 @@ std::vector<std::string> load_gitignore_rules(const fs::path &gitignore_path) {
   std::vector<std::string> rules;
   std::ifstream file(gitignore_path);
   if (!file.is_open()) {
-    std::cerr << "WARNING: Could not open gitignore file: " << gitignore_path << '\n';
+    std::cerr << "WARNING: Could not open gitignore file: " << gitignore_path
+              << '\n';
     return rules; // Return empty vector if file can't be opened
   }
   std::string line;
@@ -88,14 +89,15 @@ bool matches_gitignore_rule(const fs::path &path, const std::string &rule) {
       if (c == '*') {
         regex_pattern += ".*"; // Match zero or more of any character
       } else if (c == '?') {
-        regex_pattern += ".";  // Match any single character
+        regex_pattern += "."; // Match any single character
       } else if (c == '.') {
         regex_pattern += "\\."; // Escape dot
       } else {
         regex_pattern += c;
       }
     }
-    regex_rule = std::regex("^" + regex_pattern + "$"); // Anchor to start and end
+    regex_rule =
+        std::regex("^" + regex_pattern + "$"); // Anchor to start and end
     if (std::regex_match(path_str, regex_rule)) {
       return !negate;
     }
@@ -104,13 +106,13 @@ bool matches_gitignore_rule(const fs::path &path, const std::string &rule) {
       return !negate;
     }
   }
-  return negate; // If no match, and it's a negate rule, return true (effectively un-ignoring)
+  return negate; // If no match, and it's a negate rule, return true
+                 // (effectively un-ignoring)
 }
 
-
-bool is_path_ignored_by_gitignore(const fs::path &path,
-                                   const std::vector<std::string> &gitignore_rules,
-                                   const fs::path &base_path) {
+bool is_path_ignored_by_gitignore(
+    const fs::path &path, const std::vector<std::string> &gitignore_rules,
+    const fs::path &base_path) {
   if (gitignore_rules.empty())
     return false;
 
@@ -127,7 +129,7 @@ bool is_path_ignored_by_gitignore(const fs::path &path,
   for (const auto &rule : gitignore_rules) {
     if (matches_gitignore_rule(relative_path, rule)) {
       if (rule.rfind("!", 0) == 0) { // Negation rule
-        ignored = false; // Un-ignore if negation rule matches
+        ignored = false;             // Un-ignore if negation rule matches
       } else {
         ignored = true;
       }
@@ -160,8 +162,9 @@ bool is_file_extension_allowed(const fs::path &path,
 
 // Checks if a folder should be ignored.
 bool should_ignore_folder(const fs::path &path, const Config &config) {
-  if (config.useGitignore &&
-      is_path_ignored_by_gitignore(path, config.gitignoreRules, config.dirPath)) {
+  if (!config.disableGitignore &&
+      is_path_ignored_by_gitignore(path, config.gitignoreRules,
+                                   config.dirPath)) {
     return true;
   }
   if (config.ignoreDotFolders && path.filename().string().front() == '.') {
@@ -188,8 +191,9 @@ bool should_ignore_folder(const fs::path &path, const Config &config) {
 
 // Checks if a file should be ignored.
 bool should_ignore_file(const fs::path &path, const Config &config) {
-  if (config.useGitignore &&
-      is_path_ignored_by_gitignore(path, config.gitignoreRules, config.dirPath)) {
+  if (!config.disableGitignore &&
+      is_path_ignored_by_gitignore(path, config.gitignoreRules,
+                                   config.dirPath)) {
     return true;
   }
   fs::path relativePath = fs::relative(path, config.dirPath);
@@ -277,11 +281,11 @@ std::string remove_cpp_comments(const std::string &code) {
 std::string format_file_output(const fs::path &path, const Config &config,
                                const std::string &file_content) {
   std::stringstream content;
-  content << (config.markdownlintFixes ? "\n## File: " : "\n### File: ")
-          << (config.showRelativePath
+  content << (!config.disableMarkdownlintFixes ? "\n## File: " : "\n### File: ")
+          << (!config.showFilenameOnly
                   ? fs::relative(path, config.dirPath).string()
                   : path.filename().string())
-          << (config.markdownlintFixes ? "\n" : "") << "\n```";
+          << (!config.disableMarkdownlintFixes ? "\n" : "") << "\n```";
   if (path.has_extension())
     content << path.extension().string().substr(1);
   content << "\n";
@@ -353,7 +357,8 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
     if (config.recursiveSearch) {
       // Use recursive_directory_iterator
       fs::recursive_directory_iterator it(config.dirPath, options);
-      fs::recursive_directory_iterator end; // Default-constructed iterator as end marker.
+      fs::recursive_directory_iterator
+          end; // Default-constructed iterator as end marker.
       for (; it != end && !should_stop; ++it) { // Loop control with should_stop
         if (shouldSkipDirectory(it->path())) {
           it.disable_recursion_pending();
@@ -376,7 +381,8 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
       // Use directory_iterator
       for (fs::directory_iterator it(config.dirPath, options), end;
            it != end && !should_stop; ++it) { // Loop control with should_stop
-        if (shouldSkipDirectory(it->path())) { // Bug fix: Check for ignored folders in non-recursive mode
+        if (shouldSkipDirectory(it->path())) {
+          // folders in non-recursive mode
           continue;
         }
         if (fs::is_regular_file(it->path()) &&
@@ -386,8 +392,8 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
           if (is_last_file(it->path(), config)) {
             if (lastFilesSet.insert(it->path()).second)
               lastFilesList.push_back(it->path());
-            } else {
-              normalFiles.push_back(it->path());
+          } else {
+            normalFiles.push_back(it->path());
           }
         }
       }
@@ -395,8 +401,7 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
 
   } catch (const fs::filesystem_error &e) {
     std::cerr << "ERROR: Error scanning directory: " << e.what() << '\n';
-    return {normalFiles,
-            lastFilesList}; // Return what we have, even on error.
+    return {normalFiles, lastFilesList}; // Return what we have, even on error.
   }
 
   std::sort(normalFiles.begin(), normalFiles.end());
@@ -421,7 +426,7 @@ void process_file_chunk(std::span<const fs::path> chunk, const Config &config,
       if (!file_content.empty()) {
         total_bytes += fs::file_size(path);
 
-        if (config.ordered) {
+        if (!config.unorderedOutput) {
           std::lock_guard<std::mutex> lock(ordered_results_mutex);
           results.emplace_back(path, file_content);
         } else {
@@ -441,8 +446,7 @@ void process_file_chunk(std::span<const fs::path> chunk, const Config &config,
 void process_last_files(const std::vector<fs::path> &last_files_list,
                         const Config &config, std::atomic<bool> &should_stop,
                         std::mutex &console_mutex) {
-  // Determine the order for processing last files and dirs.  This function is
-  // now simpler.
+  // Determine the order for processing last files and dirs.
   auto get_sort_position = [&](const fs::path &relPath) -> int {
     auto exactIt =
         std::find(config.lastFiles.begin(), config.lastFiles.end(), relPath);
@@ -497,18 +501,21 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
     return false;
   }
 
-  if (config.useGitignore) {
+  if (!config.disableGitignore) {
     if (config.gitignorePath.empty()) {
       config.gitignorePath = config.dirPath / ".gitignore";
     }
     config.gitignoreRules = load_gitignore_rules(config.gitignorePath);
-    if (config.useGitignore && config.gitignoreRules.empty() &&
+    if (!config.disableGitignore && config.gitignoreRules.empty() &&
         !fs::exists(config.gitignorePath)) {
-      std::cerr << "WARNING: Gitignore option used but no gitignore file found at: "
-                << config.gitignorePath << ". Ignoring gitignore.\n";
-      config.useGitignore = false; // Disable gitignore if file not found and option used.
-    } else if (config.useGitignore && !config.gitignoreRules.empty()) {
-      std::cout << "Using gitignore rules from: " << config.gitignorePath << "\n";
+      std::cerr
+          << "WARNING: Gitignore option used but no gitignore file found at: "
+          << config.gitignorePath << ". Ignoring gitignore.\n";
+      config.disableGitignore = true; // Disable gitignore if file not found and
+                                      // option used.
+    } else if (!config.disableGitignore && !config.gitignoreRules.empty()) {
+      std::cout << "Using gitignore rules from: " << config.gitignorePath
+                << "\n";
     }
   }
 
@@ -522,11 +529,11 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
   }
 
   std::vector<std::pair<fs::path, std::string>> orderedResults;
-  if (config.ordered) {
+  if (!config.unorderedOutput) {
     orderedResults.reserve(normalFiles.size());
   }
 
-  if (config.markdownlintFixes) {
+  if (!config.disableMarkdownlintFixes) {
     std::cout << "#\n";
   }
 
@@ -565,7 +572,7 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
   }
 
   //  Output ordered results.
-  if (config.ordered) {
+  if (!config.unorderedOutput) {
     std::lock_guard<std::mutex> lock(orderedResultsMutex);
     std::sort(
         orderedResults.begin(), orderedResults.end(),
@@ -598,31 +605,36 @@ void signalHandler(int signum) {
 Config parse_arguments(int argc, char *argv[]) {
   Config config;
 
+  config.disableMarkdownlintFixes = false; // default is markdownlint fixes enabled
+  config.showFilenameOnly = false;        // default is relative path shown
+  config.disableGitignore = false;        // default is gitignore enabled
+  config.unorderedOutput = false;         // default is ordered output
+
   if (argc < 2) {
-    std::cerr
-        << "Usage: " << argv[0] << " <directory_path> [options]\n"
-        << "Options:\n"
-        << "  -m, --max-size <bytes>  Maximum file size in bytes (default: no "
-           "limit)\n"
-        << "  -n, --no-recursive     Disable recursive search\n"
-        << "  -e, --ext <ext>        Process only files with given extension "
-           "(can be used multiple times, grouped)\n"
-        << "  -d, --dot-folders      Include folders starting with a dot\n"
-        << "  -i, --ignore <item>    Ignore specific folder or file (can be "
-           "used multiple times, grouped)\n"
-        << "  -r, --regex <pattern>  Exclude files matching the regex pattern "
-           "(can be used multiple times, grouped)\n"
-        << "  -c, --remove-comments  Remove C++ style comments (// and /* */) "
-           "from code\n"
-        << "  -l, --remove-empty-lines Remove empty lines from output\n"
-        << "  -p, --relative-path    Show relative path in file headers "
-           "instead of filename\n"
-        << "  -o, --ordered          Output files in the order they were "
-           "found\n"
-        << "  -z, --last <item>      Process specified file, directory, or "
-           "filename last (order of multiple -z options is preserved).\n"
-        << "  -w, --markdownlint-fixes Enable fixes for Markdown linting\n"
-        << "  --gitignore [path]     Use gitignore rules. Path is optional, defaults to ./.gitignore\n";
+    std::cerr << "Usage: " << argv[0] << " <directory_path> [options]\n"
+              << "Options:\n"
+              << "  -m, --max-size <bytes>  Maximum file size in bytes (default: no "
+                 "limit)\n"
+              << "  -n, --no-recursive     Disable recursive search\n"
+              << "  -e, --ext <ext>        Process only files with given extension "
+                 "(can be used multiple times, grouped)\n"
+              << "  -d, --dot-folders      Include folders starting with a dot\n"
+              << "  -i, --ignore <item>    Ignore specific folder or file (can be "
+                 "used multiple times, grouped)\n"
+              << "  -r, --regex <pattern>  Exclude files matching the regex pattern "
+                 "(can be used multiple times, grouped)\n"
+              << "  -c, --remove-comments  Remove C++ style comments (// and /* */) "
+                 "from code\n"
+              << "  -l, --remove-empty-lines Remove empty lines from output\n"
+              << "  -f, --filename-only      Show only filename in file headers\n"
+              << "  -u, --unordered          Output files in unordered they were "
+                 "found\n"
+              << "  -z, --last <item>      Process specified file, directory, or "
+                 "filename last (order of multiple -z options is preserved).\n"
+              << "  -w, --no-markdownlint-fixes Disable fixes for Markdown linting\n"
+              << "  -t, --no-gitignore         Disable gitignore rules\n"
+              << "  -g, --gitignore <path>     Use gitignore rules from a specific path.\n";
+
     exit(1); // Exit immediately on usage error.
   }
 
@@ -633,8 +645,9 @@ Config parse_arguments(int argc, char *argv[]) {
     if ((arg == "-m" || arg == "--max-size") && i + 1 < argc) {
       try {
         config.maxFileSizeB = std::stoll(argv[++i]);
-      } catch (const std::invalid_argument& e) {
-        std::cerr << "ERROR: Invalid max-size value: " << argv[i] << ". Must be an integer.\n";
+      } catch (const std::invalid_argument &e) {
+        std::cerr << "ERROR: Invalid max-size value: " << argv[i]
+                  << ". Must be an integer.\n";
         exit(1);
       }
     } else if (arg == "-n" || arg == "--no-recursive") {
@@ -661,7 +674,7 @@ Config parse_arguments(int argc, char *argv[]) {
           } catch (const std::exception &e) {
             std::cerr << "ERROR: Invalid ignore path: " << absoluteEntry
                       << " is not under " << config.dirPath << '\n';
-            exit(1); // Fixed: Exit on invalid ignore path
+            exit(1);
           }
         } else {
           config.ignoredFiles.emplace_back(entry);
@@ -674,41 +687,45 @@ Config parse_arguments(int argc, char *argv[]) {
       config.removeComments = true;
     } else if (arg == "-l" || arg == "--remove-empty-lines") {
       config.removeEmptyLines = true;
-    } else if (arg == "-p" || arg == "--relative-path") {
-      config.showRelativePath = true;
-    } else if (arg == "-o" || arg == "--ordered") {
-      config.ordered = true;
+    } else if (arg == "-f" || arg == "--filename-only") {
+      config.showFilenameOnly = true;
+    } else if (arg == "-u" || arg == "--unordered") {
+      config.unorderedOutput = true;
     } else if (arg == "-z" || arg == "--last") {
       while (i + 1 < argc && argv[i + 1][0] != '-') {
         std::string entry = argv[++i];
-        fs::path absoluteEntry = fs::absolute(config.dirPath / entry); // Use absolute path first
+        fs::path absoluteEntry =
+            fs::absolute(config.dirPath / entry); // Use absolute path first
         fs::path relativeEntry;
         try {
-          relativeEntry = fs::relative(absoluteEntry, config.dirPath); // Then make relative
+          relativeEntry =
+              fs::relative(absoluteEntry, config.dirPath); // Then make relative
         } catch (const std::exception &e) {
           std::cerr << "ERROR: Invalid last path: " << absoluteEntry
                     << " is not under " << config.dirPath << '\n';
-          exit(1); // Fixed: Exit if last path is not under dirPath
+          exit(1);
         }
 
-        if (fs::is_directory(absoluteEntry)) { // Corrected line: Check absoluteEntry
+        if (fs::is_directory(absoluteEntry)) {
           config.lastDirs.emplace_back(relativeEntry);
         } else {
           config.lastFiles.emplace_back(relativeEntry);
         }
       }
-    } else if (arg == "-w" || arg == "--markdownlint-fixes") {
-      config.markdownlintFixes = true;
-    } else if (arg == "--gitignore") {
-      config.useGitignore = true;
-      if (i + 1 < argc && argv[i + 1][0] != '-') {
-        config.gitignorePath = argv[++i];
-      } else {
-        config.gitignorePath = config.dirPath / ".gitignore";
+    } else if (arg == "-w" || arg == "--no-markdownlint-fixes") {
+      config.disableMarkdownlintFixes = true;
+    } else if (arg == "-t" || arg == "--no-gitignore") {
+      config.disableGitignore = true;
+    } else if (arg == "-g" || arg == "--gitignore") {
+      config.disableGitignore = false; // Explicitly enable gitignore
+      if (i + 1 >= argc || argv[i + 1][0] == '-') {
+        std::cerr << "ERROR: --gitignore option requires a path to the gitignore file.\n";
+        exit(1);
       }
-      if (!fs::exists(config.gitignorePath) && argv[i-1] == arg) { // Check if default path and file doesn't exist, and option is just "--gitignore" without path
-          std::cerr << "WARNING: Gitignore option used but no gitignore file found at default location: " << config.gitignorePath << ". Ignoring gitignore.\n";
-          config.useGitignore = false; // Disable gitignore if file not found at default location.
+      config.gitignorePath = argv[++i];
+      if (!fs::exists(config.gitignorePath)) {
+        std::cerr << "WARNING: Gitignore file not found at: "
+                  << config.gitignorePath << ". Using gitignore might not work as expected.\n";
       }
     } else {
       std::cerr << "Invalid option: " << arg << "\n";
