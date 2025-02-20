@@ -567,7 +567,7 @@ Config parse_arguments(int argc, char *argv[]) {
             relativeEntry = absoluteEntry; // If relative fails, use absolute. Should not happen normally if under dirPath, but to be safe.
         }
 
-        if (fs::is_directory(config.dirPath / relativeEntry)) {
+        if (fs::is_directory(absoluteEntry)) { // Corrected line: Check absoluteEntry
           config.lastDirs.emplace_back(relativeEntry);
         } else {
           config.lastFiles.emplace_back(relativeEntry);
