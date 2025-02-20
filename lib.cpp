@@ -20,6 +20,7 @@ struct Config {
   unsigned long long maxFileSizeB = 0;
   bool recursiveSearch = true;
   std::vector<std::string> fileExtensions;
+  std::vector<std::string> excludedFileExtensions; // New: Excluded extensions
   bool ignoreDotFolders = true;
   std::vector<fs::path> ignoredFolders;
   std::vector<fs::path> ignoredFiles;
@@ -149,17 +150,28 @@ bool is_file_size_valid(const fs::path &path,
   }
 }
 
-// Checks if a file's extension is allowed.
+// Checks if a file's extension is allowed (and not excluded).
 bool is_file_extension_allowed(const fs::path &path,
-                               const std::vector<std::string> &extensions) {
-  if (extensions.empty())
-    return true;
+                               const std::vector<std::string> &extensions,
+                               const std::vector<std::string> &excludedExtensions) {
   const auto ext = path.extension().string();
   if (ext.empty())
     return false;
-  return std::find(extensions.begin(), extensions.end(), ext.substr(1)) !=
-         extensions.end();
+  const std::string ext_no_dot = ext.substr(1);
+
+  // Check for excluded extensions first
+  if (std::find(excludedExtensions.begin(), excludedExtensions.end(), ext_no_dot) !=
+      excludedExtensions.end()) {
+    return false; // Extension is explicitly excluded
+  }
+
+  if (extensions.empty())
+    return true; // No allowed extensions specified, not excluded, so allowed
+
+  return std::find(extensions.begin(), extensions.end(), ext_no_dot) !=
+         extensions.end(); // Check if extension is in allowed list
 }
+
 
 // Checks if a folder should be ignored.
 bool should_ignore_folder(const fs::path &path, const Config &config) {
@@ -375,7 +387,7 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
         fs::recursive_directory_iterator end;
         for (; it != end && !should_stop; ++it) {
           if (fs::is_regular_file(it->path()) &&
-              is_file_extension_allowed(it->path(), config.fileExtensions) && // Apply extension filter even in onlyLast mode
+              is_file_extension_allowed(it->path(), config.fileExtensions, config.excludedFileExtensions) && // Apply extension filter even in onlyLast mode
               !should_ignore_file(it->path(), config) && // Apply ignore file filter even in onlyLast mode
               !matches_regex_filters(it->path(), config.regexFilters)) { // Apply regex filter even in onlyLast mode
              if (lastFilesSet.insert(it->path()).second) {
@@ -406,7 +418,7 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
           continue;
         }
         if (fs::is_regular_file(it->path()) &&
-            is_file_extension_allowed(it->path(), config.fileExtensions) &&
+            is_file_extension_allowed(it->path(), config.fileExtensions, config.excludedFileExtensions) &&
             !should_ignore_file(it->path(), config) &&
             !matches_regex_filters(it->path(), config.regexFilters)) {
           if (is_last_file(it->path(), config)) {
@@ -427,7 +439,7 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
           continue;
         }
         if (fs::is_regular_file(it->path()) &&
-            is_file_extension_allowed(it->path(), config.fileExtensions) &&
+            is_file_extension_allowed(it->path(), config.fileExtensions, config.excludedFileExtensions) &&
             !should_ignore_file(it->path(), config) &&
             !matches_regex_filters(it->path(), config.regexFilters)) {
           if (is_last_file(it->path(), config)) {
@@ -657,6 +669,8 @@ Config parse_arguments(int argc, char *argv[]) {
               << "  -n, --no-recursive     Disable recursive search\n"
               << "  -e, --ext <ext>        Process only files with given extension "
                  "(can be used multiple times, grouped)\n"
+              << "  -x, --exclude-ext <ext> Exclude files with given extension "
+                 "(can be used multiple times, grouped)\n" // New option
               << "  -d, --dot-folders      Include folders starting with a dot\n"
               << "  -i, --ignore <item>    Ignore specific folder or file (can be "
                  "used multiple times, grouped)\n"
@@ -699,6 +713,14 @@ Config parse_arguments(int argc, char *argv[]) {
           ext.erase(0, 1); // Remove leading dot if present
         }
         config.fileExtensions.emplace_back(ext);
+      }
+    } else if (arg == "-x" || arg == "--exclude-ext") { // New option handling
+      while (i + 1 < argc && argv[i + 1][0] != '-') {
+        std::string ext = argv[++i];
+        if (!ext.empty() && ext[0] == '.') {
+          ext.erase(0, 1); // Remove leading dot if present
+        }
+        config.excludedFileExtensions.emplace_back(ext);
       }
     } else if (arg == "-d" || arg == "--dot-folders") {
       config.ignoreDotFolders = false;
