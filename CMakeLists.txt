@@ -6,3 +6,6 @@ set(CMAKE_CXX_STANDARD 20)
 project(DirCat)
 
 add_executable(dircat main.cpp)
+
+# Testing
+add_executable(dircat_test test.cpp)
