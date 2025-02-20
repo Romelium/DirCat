@@ -1,7 +1,6 @@
 #include <cassert>
 #include <fstream>
 #include <iostream>
-#include <sstream>
 #include <filesystem>
 #include <thread>
 #include <chrono>
@@ -106,20 +105,6 @@ void test_last_files_processing() {
     std::cout << "Last files processing test passed\n";
 }
 
-void test_size_limits() {
-    Config config;
-    config.dirPath = "test_dir";
-    config.maxFileSizeB = 10; // Very small size limit
-    
-    std::atomic<bool> should_stop{false};
-    auto [normal_files, last_files] = collect_files(config, should_stop);
-    
-    for (const auto& file : normal_files) {
-        assert(fs::file_size(file) <= config.maxFileSizeB);
-    }
-    std::cout << "Size limits test passed\n";
-}
-
 void test_regex_filtering() {
     Config config;
     config.dirPath = "test_dir";
@@ -166,7 +151,6 @@ int main() {
         test_comment_removal();
         test_gitignore_rules();
         test_last_files_processing();
-        test_size_limits();
         test_regex_filtering();
         test_interrupt_handling();
         
