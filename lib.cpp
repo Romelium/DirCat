@@ -34,6 +34,7 @@ struct Config {
   bool disableGitignore = false;
   fs::path gitignorePath;
   std::vector<std::string> gitignoreRules;
+  bool onlyLast = false; // New option: only include files/dirs in -z
 };
 
 // --- Utility Functions ---
@@ -351,6 +352,46 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
     return fs::is_directory(dirPath) && should_ignore_folder(dirPath, config);
   };
 
+  if (config.onlyLast) {
+    if (config.lastFiles.empty() && config.lastDirs.empty()) {
+        std::cerr << "ERROR: --only-last option used but no files or directories were specified with --last. Nothing to process.\n";
+        exit(1);
+    }
+    for (const auto& lastFile : config.lastFiles) {
+      fs::path absPath = fs::absolute(config.dirPath / lastFile);
+      if (fs::exists(absPath) && fs::is_regular_file(absPath)) {
+        if (lastFilesSet.insert(absPath).second) {
+          lastFilesList.push_back(absPath);
+        }
+      } else {
+        std::cerr << "ERROR: --only-last specified file not found or not a regular file: " << absPath << '\n';
+        exit(1);
+      }
+    }
+    for (const auto& lastDir : config.lastDirs) {
+      fs::path absDirPath = fs::absolute(config.dirPath / lastDir);
+      if (fs::exists(absDirPath) && fs::is_directory(absDirPath)) {
+        fs::recursive_directory_iterator it(absDirPath, fs::directory_options::skip_permission_denied);
+        fs::recursive_directory_iterator end;
+        for (; it != end && !should_stop; ++it) {
+          if (fs::is_regular_file(it->path()) &&
+              is_file_extension_allowed(it->path(), config.fileExtensions) && // Apply extension filter even in onlyLast mode
+              !should_ignore_file(it->path(), config) && // Apply ignore file filter even in onlyLast mode
+              !matches_regex_filters(it->path(), config.regexFilters)) { // Apply regex filter even in onlyLast mode
+             if (lastFilesSet.insert(it->path()).second) {
+                lastFilesList.push_back(it->path());
+              }
+          }
+        }
+      } else {
+        std::cerr << "ERROR: --only-last specified directory not found or not a directory: " << absDirPath << '\n';
+        exit(1);
+      }
+    }
+    return {normalFiles, lastFilesList}; // normalFiles is empty when onlyLast is true
+  }
+
+
   try {
     auto options = fs::directory_options::skip_permission_denied;
 
@@ -518,10 +559,10 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
 
   auto [normalFiles, lastFilesList] = collect_files(config, should_stop);
 
-  if (normalFiles.empty() && config.lastFiles.empty() &&
-      config.lastDirs.empty()) {
-    std::cout << "No matching files found in: " << config.dirPath.string()
-              << "\n";
+  if (normalFiles.empty() && lastFilesList.empty() ) {
+    if (!config.onlyLast) {
+        std::cout << "No matching files found in: " << config.dirPath.string() << "\n";
+    }
     return true;
   }
 
@@ -606,6 +647,7 @@ Config parse_arguments(int argc, char *argv[]) {
   config.showFilenameOnly = false;        // default is relative path shown
   config.disableGitignore = false;        // default is gitignore enabled
   config.unorderedOutput = false;         // default is ordered output
+  config.onlyLast = false;                // default is not only-last mode
 
   if (argc < 2) {
     std::cerr << "Usage: " << argv[0] << " <directory_path> [options]\n"
@@ -628,6 +670,7 @@ Config parse_arguments(int argc, char *argv[]) {
                  "found\n"
               << "  -z, --last <item>      Process specified file, directory, or "
                  "filename last (order of multiple -z options is preserved).\n"
+              << "  -Z, --only-last         Only process specified files and directories from --last options, ignoring all other files.\n"
               << "  -w, --no-markdownlint-fixes Disable fixes for Markdown linting\n"
               << "  -t, --no-gitignore         Disable gitignore rules\n"
               << "  -g, --gitignore <path>     Use gitignore rules from a specific path.\n";
@@ -709,6 +752,8 @@ Config parse_arguments(int argc, char *argv[]) {
           config.lastFiles.emplace_back(relativeEntry);
         }
       }
+    } else if (arg == "-Z" || arg == "--only-last") {
+        config.onlyLast = true;
     } else if (arg == "-w" || arg == "--no-markdownlint-fixes") {
       config.disableMarkdownlintFixes = true;
     } else if (arg == "-t" || arg == "--no-gitignore") {
