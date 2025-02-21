@@ -50,8 +50,8 @@ jobs:
             - Linux (ARM64): `dircat-linux-arm64`
             - macOS (x86_64): `dircat-macos-x86_64`
             - macOS (ARM64): `dircat-macos-arm64`
-          draft: true
-          prerelease: true
+          draft: false
+          prerelease: false
 
   build-and-upload:
     needs: create-release
