@@ -15,9 +15,10 @@ int main(int argc, char *argv[]) {
 
   if (fs::is_regular_file(config.dirPath)) {
     config.showFilenameOnly = true;
-    std::string file_content = process_single_file(config.dirPath, config);
-    if (!file_content.empty()) {
-      std::cout << file_content;
+    if (process_file(config.dirPath, config)) {
+      return 0;
+    } else {
+      return 1;
     }
     return 0;
   } else if (fs::is_directory(config.dirPath)) {

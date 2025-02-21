@@ -176,26 +176,28 @@ bool is_file_extension_allowed(
 }
 
 // Checks if a folder should be ignored.
-bool should_ignore_folder(const fs::path &path, const Config &config) {
-  if (!config.disableGitignore &&
-      is_path_ignored_by_gitignore(path, config.gitignoreRules,
-                                   config.dirPath)) {
+bool should_ignore_folder(const fs::path &path, bool disableGitignore,
+                          const std::vector<std::string> &gitignoreRules,
+                          const fs::path &dirPath, bool ignoreDotFolders,
+                          const std::vector<fs::path> &ignoredFolders) {
+  if (!disableGitignore &&
+      is_path_ignored_by_gitignore(path, gitignoreRules, dirPath)) {
     return true;
   }
-  if (config.ignoreDotFolders && path.filename().string().front() == '.') {
+  if (ignoreDotFolders && path.filename().string().front() == '.') {
     return true;
   }
 
   fs::path relativePath;
   try {
-    relativePath = fs::relative(path, config.dirPath);
+    relativePath = fs::relative(path, dirPath);
   } catch (const std::exception &e) {
     std::cerr << "ERROR: Error getting relative path for " << path.string()
               << ": " << e.what() << '\n';
     return false;
   }
 
-  for (const auto &ignoredFolder : config.ignoredFolders) {
+  for (const auto &ignoredFolder : ignoredFolders) {
     if (relativePath.string().find(ignoredFolder.string()) == 0) {
       return true;
     }
@@ -205,17 +207,21 @@ bool should_ignore_folder(const fs::path &path, const Config &config) {
 }
 
 // Checks if a file should be ignored.
-bool should_ignore_file(const fs::path &path, const Config &config) {
-  if (!config.disableGitignore &&
-      is_path_ignored_by_gitignore(path, config.gitignoreRules, config.dirPath))
+bool should_ignore_file(const fs::path &path, bool disableGitignore,
+                        const std::vector<std::string> &gitignoreRules,
+                        const fs::path &dirPath,
+                        unsigned long long maxFileSizeB,
+                        const std::vector<fs::path> &ignoredFiles) {
+  if (!disableGitignore &&
+      is_path_ignored_by_gitignore(path, gitignoreRules, dirPath))
     return true;
 
-  if (!is_file_size_valid(path, config.maxFileSizeB))
+  if (!is_file_size_valid(path, maxFileSizeB))
     return true;
 
-  fs::path relativePath = fs::relative(path, config.dirPath);
-  return std::find(config.ignoredFiles.begin(), config.ignoredFiles.end(),
-                   relativePath) != config.ignoredFiles.end();
+  fs::path relativePath = fs::relative(path, dirPath);
+  return std::find(ignoredFiles.begin(), ignoredFiles.end(), relativePath) !=
+         ignoredFiles.end();
 }
 
 // Checks if a file matches any of the regex filters.
@@ -295,14 +301,16 @@ std::string remove_cpp_comments(const std::string &code) {
 }
 
 // Formats the output for a single file.
-std::string format_file_output(const fs::path &path, const Config &config,
-                               const std::string &file_content) {
+std::string format_file_output(const fs::path &path,
+                               bool disableMarkdownlintFixes,
+                               bool showFilenameOnly, const fs::path &dirPath,
+                               const std::string &file_content,
+                               bool removeEmptyLines) {
   std::stringstream content;
-  content << (!config.disableMarkdownlintFixes ? "\n## File: " : "\n### File: ")
-          << (!config.showFilenameOnly
-                  ? fs::relative(path, config.dirPath).string()
-                  : path.filename().string())
-          << (!config.disableMarkdownlintFixes ? "\n" : "") << "\n```";
+  content << (!disableMarkdownlintFixes ? "\n## File: " : "\n### File: ")
+          << (!showFilenameOnly ? fs::relative(path, dirPath).string()
+                                : path.filename().string())
+          << (!disableMarkdownlintFixes ? "\n" : "") << "\n```";
   if (path.has_extension())
     content << path.extension().string().substr(1);
   content << "\n";
@@ -312,7 +320,7 @@ std::string format_file_output(const fs::path &path, const Config &config,
   while (std::getline(iss, line)) {
     if (!line.empty() && line.back() == '\r')
       line.pop_back();
-    if (config.removeEmptyLines &&
+    if (removeEmptyLines &&
         line.find_first_not_of(" \t\r\n") == std::string::npos)
       continue;
     content << line << '\n';
@@ -322,36 +330,44 @@ std::string format_file_output(const fs::path &path, const Config &config,
 }
 
 // Processes a single file and returns its formatted content.
-std::string process_single_file(const fs::path &path, const Config &config) {
+std::string process_single_file(const fs::path &path,
+                                unsigned long long maxFileSizeB,
+                                bool removeComments,
+                                bool disableMarkdownlintFixes,
+                                bool showFilenameOnly, const fs::path &dirPath,
+                                bool removeEmptyLines) {
   std::ifstream file(path, std::ios::binary);
-  if (!file || !is_file_size_valid(path, config.maxFileSizeB)) {
+  if (!file || !is_file_size_valid(path, maxFileSizeB)) {
     return ""; // Return empty string if file cannot be opened or size invalid.
   }
 
   std::string fileContent((std::istreambuf_iterator<char>(file)),
                           std::istreambuf_iterator<char>());
 
-  if (config.removeComments) {
+  if (removeComments) {
     fileContent = remove_cpp_comments(fileContent);
   }
 
-  return format_file_output(path, config, fileContent);
+  return format_file_output(path, disableMarkdownlintFixes, showFilenameOnly,
+                            dirPath, fileContent, removeEmptyLines);
 }
 
 // --- File Collection ---
 
 // Checks if a file should be processed last.
-bool is_last_file(const fs::path &absPath, const Config &config) {
-  fs::path relPath = fs::relative(absPath, config.dirPath);
+bool is_last_file(const fs::path &absPath, const fs::path &dirPath,
+                  const std::vector<fs::path> &lastFiles,
+                  const std::vector<fs::path> &lastDirs) {
+  fs::path relPath = fs::relative(absPath, dirPath);
 
-  if (std::find(config.lastFiles.begin(), config.lastFiles.end(), relPath) !=
-          config.lastFiles.end() ||
-      std::find(config.lastFiles.begin(), config.lastFiles.end(),
-                absPath.filename()) != config.lastFiles.end()) {
+  if (std::find(lastFiles.begin(), lastFiles.end(), relPath) !=
+          lastFiles.end() ||
+      std::find(lastFiles.begin(), lastFiles.end(), absPath.filename()) !=
+          lastFiles.end()) {
     return true;
   }
 
-  return std::any_of(config.lastDirs.begin(), config.lastDirs.end(),
+  return std::any_of(lastDirs.begin(), lastDirs.end(),
                      [&](const auto &dirRelPath) {
                        return relPath.string().find(dirRelPath.string()) == 0;
                      });
@@ -365,7 +381,10 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
   std::unordered_set<fs::path> lastFilesSet;
 
   auto shouldSkipDirectory = [&](const fs::path &dirPath) {
-    return fs::is_directory(dirPath) && should_ignore_folder(dirPath, config);
+    return fs::is_directory(dirPath) &&
+           should_ignore_folder(dirPath, config.disableGitignore,
+                                config.gitignoreRules, config.dirPath,
+                                config.ignoreDotFolders, config.ignoredFolders);
   };
 
   if (config.onlyLast) {
@@ -397,7 +416,9 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
           if (fs::is_regular_file(it->path()) &&
               is_file_extension_allowed(it->path(), config.fileExtensions,
                                         config.excludedFileExtensions) &&
-              !should_ignore_file(it->path(), config) &&
+              !should_ignore_file(it->path(), config.disableGitignore,
+                                  config.gitignoreRules, config.dirPath,
+                                  config.maxFileSizeB, config.ignoredFiles) &&
               !matches_regex_filters(it->path(), config.regexFilters)) {
             if (lastFilesSet.insert(it->path()).second) {
               lastFilesList.push_back(it->path());
@@ -431,9 +452,12 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
         if (fs::is_regular_file(it->path()) &&
             is_file_extension_allowed(it->path(), config.fileExtensions,
                                       config.excludedFileExtensions) &&
-            !should_ignore_file(it->path(), config) &&
+            !should_ignore_file(it->path(), config.disableGitignore,
+                                config.gitignoreRules, config.dirPath,
+                                config.maxFileSizeB, config.ignoredFiles) &&
             !matches_regex_filters(it->path(), config.regexFilters)) {
-          if (is_last_file(it->path(), config)) {
+          if (is_last_file(it->path(), config.dirPath, config.lastFiles,
+                           config.lastDirs)) {
             if (lastFilesSet.insert(it->path()).second) {
               lastFilesList.push_back(it->path());
             }
@@ -453,9 +477,12 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
         if (fs::is_regular_file(it->path()) &&
             is_file_extension_allowed(it->path(), config.fileExtensions,
                                       config.excludedFileExtensions) &&
-            !should_ignore_file(it->path(), config) &&
+            !should_ignore_file(it->path(), config.disableGitignore,
+                                config.gitignoreRules, config.dirPath,
+                                config.maxFileSizeB, config.ignoredFiles) &&
             !matches_regex_filters(it->path(), config.regexFilters)) {
-          if (is_last_file(it->path(), config)) {
+          if (is_last_file(it->path(), config.dirPath, config.lastFiles,
+                           config.lastDirs)) {
             if (lastFilesSet.insert(it->path()).second)
               lastFilesList.push_back(it->path());
           } else {
@@ -477,7 +504,10 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
 // --- File Processing ---
 
 // Processes a chunk of files.
-void process_file_chunk(std::span<const fs::path> chunk, const Config &config,
+void process_file_chunk(std::span<const fs::path> chunk, bool unorderedOutput,
+                        bool removeComments, unsigned long long maxFileSizeB,
+                        bool disableMarkdownlintFixes, bool showFilenameOnly,
+                        const fs::path &dirPath, bool removeEmptyLines,
                         std::vector<std::pair<fs::path, std::string>> &results,
                         std::atomic<size_t> &processed_files,
                         std::atomic<size_t> &total_bytes,
@@ -488,11 +518,13 @@ void process_file_chunk(std::span<const fs::path> chunk, const Config &config,
     if (should_stop)
       break;
     try {
-      std::string file_content = process_single_file(path, config);
+      std::string file_content = process_single_file(
+          path, maxFileSizeB, removeComments, disableMarkdownlintFixes,
+          showFilenameOnly, dirPath, removeEmptyLines);
       if (!file_content.empty()) {
         total_bytes += fs::file_size(path);
 
-        if (!config.unorderedOutput) {
+        if (!unorderedOutput) {
           std::lock_guard<std::mutex> lock(ordered_results_mutex);
           results.emplace_back(path, file_content);
         } else {
@@ -548,7 +580,10 @@ void process_last_files(const std::vector<fs::path> &last_files_list,
   for (const auto &file : sorted_last_files) {
     if (should_stop)
       break;
-    std::string file_content = process_single_file(file, config);
+    std::string file_content = process_single_file(
+        file, config.maxFileSizeB, config.removeComments,
+        config.disableMarkdownlintFixes, config.showFilenameOnly,
+        config.dirPath, config.removeEmptyLines);
     if (!file_content.empty()) {
       std::lock_guard<std::mutex> lock(
           console_mutex); // Lock for console output.
@@ -558,6 +593,22 @@ void process_last_files(const std::vector<fs::path> &last_files_list,
 }
 
 // --- Main Processing Function ---
+
+bool process_file(const fs::path &path, const Config &config) {
+  try {
+    std::string file_content =
+        process_single_file(path, config.maxFileSizeB, config.removeComments,
+                            config.disableMarkdownlintFixes, true,
+                            config.dirPath, config.removeEmptyLines);
+    if (!file_content.empty()) {
+      std::cout << file_content;
+    }
+  } catch (const std::exception &e) {
+    std::cerr << "ERROR: Processing Single File: " << e.what() << '\n';
+    return false;
+  }
+  return true;
+}
 
 // Processes all files in the specified directory.
 bool process_directory(Config config, std::atomic<bool> &should_stop) {
@@ -623,8 +674,11 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
       try {
         process_file_chunk(
             std::span{normalFiles.begin() + start, normalFiles.begin() + end},
-            config, orderedResults, processedFiles, totalBytes, consoleMutex,
-            orderedResultsMutex, should_stop);
+            config.unorderedOutput, config.removeComments, config.maxFileSizeB,
+            config.disableMarkdownlintFixes, config.showFilenameOnly,
+            config.dirPath, config.removeEmptyLines, orderedResults,
+            processedFiles, totalBytes, consoleMutex, orderedResultsMutex,
+            should_stop);
       } catch (const std::exception &e) {
         std::cerr << "ERROR: Exception in thread: " << e.what() << '\n';
       }
