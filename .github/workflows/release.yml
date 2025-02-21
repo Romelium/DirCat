@@ -1,3 +1,5 @@
+# .github/workflows/release.yml
+
 name: Release
 
 on:
@@ -37,19 +39,19 @@ jobs:
           release_name: Release ${{ github.ref_name }}
           body: |
             ## Changes in this Release
-            
+
             ${{ steps.changelog.outputs.CHANGELOG }}
-            
+
             ## Installation
-            
+
             Download the appropriate binary for your platform:
             - Windows: `dircat-windows.exe`
             - Linux (x86_64): `dircat-linux-x86_64`
             - Linux (ARM64): `dircat-linux-arm64`
             - macOS (x86_64): `dircat-macos-x86_64`
             - macOS (ARM64): `dircat-macos-arm64`
-          draft: false
-          prerelease: false
+          draft: true
+          prerelease: true
 
   build-and-upload:
     needs: create-release
@@ -73,9 +75,9 @@ jobs:
           - os: macos-latest
             artifact_name: dircat-macos-arm64
             target: aarch64-apple-darwin
-    
+
     runs-on: ${{ matrix.os }}
-    
+
     steps:
       - uses: actions/checkout@v4
 
@@ -118,13 +120,24 @@ jobs:
           -DCMAKE_SYSTEM_NAME=Darwin \
           -DCMAKE_OSX_ARCHITECTURES=arm64
 
-      - name: Build
+      - name: Test
+        if: matrix.target != 'aarch64-unknown-linux-gnu'
+        shell: bash
+        run: |
+          cmake --build build --config Release --target dircat_test
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            ./build/Release/dircat_test.exe
+          else
+            ./build/dircat_test
+          fi
+
+      - name: Build dircat
         run: cmake --build build --config Release --target dircat
 
       - name: Prepare Binary
         shell: bash
         run: |
-          if [ "${{ runner.os }}" == "Windows" ]; then
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
             cp build/Release/dircat.exe ${{ matrix.artifact_name }}
           else
             cp build/dircat ${{ matrix.artifact_name }}
