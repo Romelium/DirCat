@@ -7,7 +7,7 @@
 #include <regex>
 #include <span>
 #include <sstream>
-#include <string> // Make sure to include <string>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <unordered_set>
@@ -21,7 +21,7 @@ struct Config {
   unsigned long long maxFileSizeB = 0;
   bool recursiveSearch = true;
   std::vector<std::string> fileExtensions;
-  std::vector<std::string> excludedFileExtensions; // New: Excluded extensions
+  std::vector<std::string> excludedFileExtensions;
   bool ignoreDotFolders = true;
   std::vector<fs::path> ignoredFolders;
   std::vector<fs::path> ignoredFiles;
@@ -36,15 +36,14 @@ struct Config {
   bool disableGitignore = false;
   fs::path gitignorePath;
   std::vector<std::string> gitignoreRules;
-  bool onlyLast = false; // New option: only include files/dirs in -z
+  bool onlyLast = false;
 };
 
 // --- Utility Functions ---
 
 // Helper function to trim whitespace from a string
 std::string trim(std::string_view str) {
-  constexpr std::string_view whitespace =
-      " \t\n\r\f\v"; // All standard whitespace
+  constexpr std::string_view whitespace = " \t\n\r\f\v";
 
   size_t start = str.find_first_not_of(whitespace);
   if (start == std::string_view::npos) {
@@ -74,7 +73,7 @@ std::vector<std::string> load_gitignore_rules(const fs::path &gitignore_path) {
   return rules;
 }
 
-// gitignore-style
+// gitignore-style matching
 bool matches_gitignore_rule(const fs::path &path, const std::string &rule) {
   std::string path_str = path.string();
   std::string rule_str = rule;
@@ -85,8 +84,7 @@ bool matches_gitignore_rule(const fs::path &path, const std::string &rule) {
     rule_str.erase(0, 1);
   }
 
-  if (rule_str.back() ==
-      '/') { // Directory rule (prefix match, no fs::is_directory check here)
+  if (rule_str.back() == '/') {             // Directory rule (prefix match)
     if (path_str.rfind(rule_str, 0) == 0) { // Just check prefix
       return true; // Directory rule matches if path starts with rule prefix
     }
@@ -140,7 +138,6 @@ bool is_path_ignored_by_gitignore(
         ignored = true; // Ignore
       }
     }
-    // If a negation rule matches, it un-ignores, otherwise it ignores.
     // The *last matching rule* determines the final state.
   }
   return ignored;
@@ -398,16 +395,10 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
         fs::recursive_directory_iterator end;
         for (; it != end && !should_stop; ++it) {
           if (fs::is_regular_file(it->path()) &&
-              is_file_extension_allowed(
-                  it->path(), config.fileExtensions,
-                  config.excludedFileExtensions) && // Apply extension filter
-                                                    // even in onlyLast mode
-              !should_ignore_file(
-                  it->path(),
-                  config) && // Apply ignore file filter even in onlyLast mode
-              !matches_regex_filters(
-                  it->path(), config.regexFilters)) { // Apply regex filter even
-                                                      // in onlyLast mode
+              is_file_extension_allowed(it->path(), config.fileExtensions,
+                                        config.excludedFileExtensions) &&
+              !should_ignore_file(it->path(), config) &&
+              !matches_regex_filters(it->path(), config.regexFilters)) {
             if (lastFilesSet.insert(it->path()).second) {
               lastFilesList.push_back(it->path());
             }
@@ -747,7 +738,7 @@ Config parse_arguments(int argc, char *argv[]) {
         }
         config.fileExtensions.emplace_back(ext);
       }
-    } else if (arg == "-x" || arg == "--exclude-ext") { // New option handling
+    } else if (arg == "-x" || arg == "--exclude-ext") {
       while (i + 1 < argc && argv[i + 1][0] != '-') {
         std::string ext = argv[++i];
         if (!ext.empty() && ext[0] == '.') {
