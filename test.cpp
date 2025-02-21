@@ -345,7 +345,7 @@ void test_process_file_chunk_unordered() {
         config.unorderedOutput, config.removeComments, config.maxFileSizeB,
         config.disableMarkdownlintFixes, config.showFilenameOnly,
         config.dirPath, config.removeEmptyLines, results, processed_files,
-        total_bytes, console_mutex, ordered_results_mutex, should_stop);
+        total_bytes, console_mutex, ordered_results_mutex, should_stop, std::cout);
   });
 
   assert(processed_files == 2);
@@ -381,7 +381,7 @@ void test_process_file_chunk_ordered() {
         config.unorderedOutput, config.removeComments, config.maxFileSizeB,
         config.disableMarkdownlintFixes, config.showFilenameOnly,
         config.dirPath, config.removeEmptyLines, results, processed_files,
-        total_bytes, console_mutex, ordered_results_mutex, should_stop);
+        total_bytes, console_mutex, ordered_results_mutex, should_stop, std::cout);
   });
 
   assert(processed_files == 2);
@@ -390,6 +390,30 @@ void test_process_file_chunk_ordered() {
   assert(results[0].first.filename() == "file1.cpp");
   assert(results[1].first.filename() == "FILE3.HPP");
   std::cout << "Process file chunk ordered test passed\n";
+}
+
+void test_output_to_file() {
+  Config config;
+  config.dirPath = "test_dir";
+  config.outputFile = "test_output.txt"; // Set output file
+  std::atomic<bool> should_stop{false};
+
+  std::string expected_content_part = "File: file1.cpp"; // Part of expected output
+
+  capture_stdout([&]() { // Capture stdout to prevent polluting test output
+    process_directory(config, should_stop);
+  });
+
+  std::ifstream outputFileStream("test_output.txt");
+  std::string output_file_content((std::istreambuf_iterator<char>(outputFileStream)),
+                                  std::istreambuf_iterator<char>());
+
+  assert(outputFileStream.is_open()); // Check if file was created
+  assert(output_file_content.find(expected_content_part) != std::string::npos); // Check content
+
+  outputFileStream.close(); // Close the input file stream
+  fs::remove("test_output.txt"); // Cleanup output file
+  std::cout << "Output to file test passed\n";
 }
 
 int main() {
@@ -413,6 +437,7 @@ int main() {
     test_collect_files_only_last();
     test_process_file_chunk_unordered();
     test_process_file_chunk_ordered();
+    test_output_to_file();
 
     cleanup_test_directory();
     std::cout << "\nAll tests passed successfully!\n";

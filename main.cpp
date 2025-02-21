@@ -1,5 +1,6 @@
 #include "./lib.cpp"
 #include <csignal>
+#include <iostream>
 
 int main(int argc, char *argv[]) {
   Config config = parse_arguments(argc, argv);
@@ -15,7 +16,7 @@ int main(int argc, char *argv[]) {
 
   if (fs::is_regular_file(config.dirPath)) {
     config.showFilenameOnly = true;
-    if (process_file(config.dirPath, config)) {
+    if (process_file(config.dirPath, config, std::cout)) { // Pass std::cout
       return 0;
     } else {
       return 1;

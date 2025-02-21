@@ -37,6 +37,7 @@ struct Config {
   fs::path gitignorePath;
   std::vector<std::string> gitignoreRules;
   bool onlyLast = false;
+  fs::path outputFile;
 };
 
 // --- Utility Functions ---
@@ -513,7 +514,8 @@ void process_file_chunk(std::span<const fs::path> chunk, bool unorderedOutput,
                         std::atomic<size_t> &total_bytes,
                         std::mutex &console_mutex,
                         std::mutex &ordered_results_mutex,
-                        std::atomic<bool> &should_stop) {
+                        std::atomic<bool> &should_stop,
+                        std::ostream &output_stream) { // Pass output_stream
   for (const auto &path : chunk) {
     if (should_stop)
       break;
@@ -529,7 +531,7 @@ void process_file_chunk(std::span<const fs::path> chunk, bool unorderedOutput,
           results.emplace_back(path, file_content);
         } else {
           std::lock_guard<std::mutex> lock(console_mutex);
-          std::cout << file_content;
+          output_stream << file_content; // Use output_stream
         }
       }
       ++processed_files;
@@ -543,7 +545,8 @@ void process_file_chunk(std::span<const fs::path> chunk, bool unorderedOutput,
 // Processes files that should be processed last.
 void process_last_files(const std::vector<fs::path> &last_files_list,
                         const Config &config, std::atomic<bool> &should_stop,
-                        std::mutex &console_mutex) {
+                        std::mutex &console_mutex,
+                        std::ostream &output_stream) { // Pass output_stream
   // Determine the order for processing last files and dirs.
   auto get_sort_position = [&](const fs::path &relPath) -> int {
     auto exactIt =
@@ -586,22 +589,23 @@ void process_last_files(const std::vector<fs::path> &last_files_list,
         config.dirPath, config.removeEmptyLines);
     if (!file_content.empty()) {
       std::lock_guard<std::mutex> lock(
-          console_mutex); // Lock for console output.
-      std::cout << file_content;
+          console_mutex);            // Lock for console output.
+      output_stream << file_content; // Use output_stream
     }
   }
 }
 
 // --- Main Processing Function ---
 
-bool process_file(const fs::path &path, const Config &config) {
+bool process_file(const fs::path &path, const Config &config,
+                  std::ostream &output_stream) { // Pass output_stream
   try {
     std::string file_content =
         process_single_file(path, config.maxFileSizeB, config.removeComments,
                             config.disableMarkdownlintFixes, true,
                             config.dirPath, config.removeEmptyLines);
     if (!file_content.empty()) {
-      std::cout << file_content;
+      output_stream << file_content; // Use output_stream
     }
   } catch (const std::exception &e) {
     std::cerr << "ERROR: Processing Single File: " << e.what() << '\n';
@@ -648,8 +652,22 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
     orderedResults.reserve(normalFiles.size());
   }
 
+  // Output stream setup - either to file or stdout
+  std::ofstream outputFileStream;
+  std::ostream *outputPtr = &std::cout; // Default to stdout
+  if (!config.outputFile.empty()) {
+    outputFileStream.open(config.outputFile);
+    if (!outputFileStream.is_open()) {
+      std::cerr << "ERROR: Could not open output file: " << config.outputFile
+                << '\n';
+      return false; // Or handle error as needed
+    }
+    outputPtr = &outputFileStream; // Redirect to file
+  }
+  std::ostream &output_stream = *outputPtr;
+
   if (!config.disableMarkdownlintFixes) {
-    std::cout << "#\n";
+    output_stream << "#\n";
   }
 
   std::atomic<size_t> processedFiles{0};
@@ -678,7 +696,7 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
             config.disableMarkdownlintFixes, config.showFilenameOnly,
             config.dirPath, config.removeEmptyLines, orderedResults,
             processedFiles, totalBytes, consoleMutex, orderedResultsMutex,
-            should_stop);
+            should_stop, output_stream); // Pass output_stream
       } catch (const std::exception &e) {
         std::cerr << "ERROR: Exception in thread: " << e.what() << '\n';
       }
@@ -699,11 +717,17 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
                  std::find(normalFiles.begin(), normalFiles.end(), b.first);
         });
     for (const auto &result : orderedResults) {
-      std::cout << result.second; // Directly output here.
+      output_stream << result.second; // Directly output here.
     }
   }
 
-  process_last_files(lastFilesList, config, should_stop, consoleMutex);
+  process_last_files(lastFilesList, config, should_stop, consoleMutex,
+                     output_stream); // Pass output_stream
+
+  if (outputFileStream.is_open()) {
+    outputFileStream.close(); // Explicitly close the file stream
+  }
+
   return true;
 }
 
@@ -753,6 +777,8 @@ Config parse_arguments(int argc, char *argv[]) {
         {"-w, --no-markdownlint-fixes", "Disable fixes for Markdown linting"},
         {"-t, --no-gitignore", "Disable gitignore rules"},
         {"-g, --gitignore <path>", "Use gitignore rules from a specific path."},
+        {"-o, --output <file>",
+         "Output to the specified file instead of stdout."},
     };
 
     size_t max_option_length = 0;
@@ -871,6 +897,9 @@ Config parse_arguments(int argc, char *argv[]) {
                   << config.gitignorePath
                   << ". Using gitignore might not work as expected.\n";
       }
+    } else if ((arg == "-o" || arg == "--output") &&
+               i + 1 < argc) { // Output file option
+      config.outputFile = argv[++i];
     } else {
       std::cerr << "Invalid option: " << arg << "\n";
       exit(1); // Exit on invalid options
