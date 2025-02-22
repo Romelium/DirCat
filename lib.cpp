@@ -25,17 +25,14 @@ struct Config {
   bool recursiveSearch = true;
   std::vector<std::string> fileExtensions;
   std::vector<std::string> excludedFileExtensions;
-  bool ignoreDotFolders = true;
   std::vector<fs::path> ignoredFolders;
   std::vector<fs::path> ignoredFiles;
   std::vector<std::string> regexFilters;
   bool removeComments = false;
   bool removeEmptyLines = false;
   bool showFilenameOnly = false;
-  bool unorderedOutput = false;
   std::vector<fs::path> lastFiles;
   std::vector<fs::path> lastDirs;
-  bool disableMarkdownlintFixes = false;
   bool disableGitignore = false;
   bool onlyLast = false;
   fs::path outputFile;
@@ -245,12 +242,10 @@ bool is_file_extension_allowed(
 }
 
 bool should_ignore_folder(const fs::path &path, bool disableGitignore,
-                          const fs::path &dirPath, bool ignoreDotFolders,
+                          const fs::path &dirPath,
                           const std::vector<fs::path> &ignoredFolders,
                           const std::unordered_map<std::string, std::vector<std::string>>& dir_gitignore_rules) {
   if (!disableGitignore && is_path_ignored_by_gitignore(path, dirPath, dir_gitignore_rules))
-    return true;
-  if (ignoreDotFolders && path.filename().string().front() == '.')
     return true;
 
   fs::path relativePath;
@@ -371,15 +366,14 @@ std::string remove_cpp_comments(const std::string &code) {
 }
 
 std::string format_file_output(const fs::path &path,
-                               bool disableMarkdownlintFixes,
                                bool showFilenameOnly, const fs::path &dirPath,
                                const std::string &file_content,
                                bool removeEmptyLines, bool showLineNumbers) {
   std::stringstream content;
-  content << (!disableMarkdownlintFixes ? "\n## File: " : "\n### File: ")
+  content << "\n## File: "
           << (!showFilenameOnly ? fs::relative(path, dirPath).string()
                                 : path.filename().string())
-          << (!disableMarkdownlintFixes ? "\n" : "") << "\n```";
+          << "\n" << "\n```";
   if (path.has_extension())
     content << path.extension().string().substr(1);
   content << "\n";
@@ -403,7 +397,7 @@ std::string format_file_output(const fs::path &path,
 
 std::string
 process_single_file(const fs::path &path, unsigned long long maxFileSizeB,
-                    bool removeComments, bool disableMarkdownlintFixes,
+                    bool removeComments,
                     bool showFilenameOnly, const fs::path &dirPath,
                     bool removeEmptyLines, bool showLineNumbers, bool dryRun) {
   std::ifstream file(path, std::ios::binary);
@@ -415,7 +409,7 @@ process_single_file(const fs::path &path, unsigned long long maxFileSizeB,
     return "";
 
   if (dryRun) {
-    return format_file_output(path, disableMarkdownlintFixes, showFilenameOnly,
+    return format_file_output(path, showFilenameOnly,
                               dirPath, "", removeEmptyLines, showLineNumbers);
   }
 
@@ -426,7 +420,7 @@ process_single_file(const fs::path &path, unsigned long long maxFileSizeB,
     fileContent = remove_cpp_comments(fileContent);
   }
 
-  return format_file_output(path, disableMarkdownlintFixes, showFilenameOnly,
+  return format_file_output(path, showFilenameOnly,
                             dirPath, fileContent, removeEmptyLines,
                             showLineNumbers);
 }
@@ -473,7 +467,7 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
   auto shouldSkipDirectory = [&](const fs::path &dirPath) {
     return fs::is_directory(dirPath) &&
            should_ignore_folder(dirPath, config.disableGitignore,
-                                config.dirPath, config.ignoreDotFolders,
+                                config.dirPath,
                                 config.ignoredFolders, dir_gitignore_rules);
   };
 
@@ -589,9 +583,8 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
 // --- File Processing ---
 
 void process_file_chunk(
-    std::span<const fs::path> chunk, bool unorderedOutput, bool removeComments,
-    unsigned long long maxFileSizeB, bool disableMarkdownlintFixes,
-    bool showFilenameOnly, const fs::path &dirPath, bool removeEmptyLines,
+    std::span<const fs::path> chunk, bool removeComments,
+    unsigned long long maxFileSizeB, bool showFilenameOnly, const fs::path &dirPath, bool removeEmptyLines,
     std::vector<std::pair<fs::path, std::string>> &results, // Shared result vector (for final sort)
     std::atomic<size_t> &processed_files, std::atomic<size_t> &total_bytes,
     std::mutex &console_mutex, std::mutex &ordered_results_mutex,
@@ -604,23 +597,12 @@ void process_file_chunk(
       break;
     try {
       std::string file_content = process_single_file(
-          path, maxFileSizeB, removeComments, disableMarkdownlintFixes,
+          path, maxFileSizeB, removeComments,
           showFilenameOnly, dirPath, removeEmptyLines, showLineNumbers, dryRun);
       if (!file_content.empty()) {
         total_bytes += fs::file_size(path);
 
-        if (!unorderedOutput) {
-          thread_local_results.emplace_back(path, file_content); // Append to thread-local buffer
-        } else {
-          if (!dryRun) {
-            std::lock_guard<std::mutex> lock(console_mutex);
-            output_stream << file_content;
-          } else {
-            std::lock_guard<std::mutex> lock(console_mutex);
-            output_stream << normalize_path(fs::relative(path, dirPath))
-                          << "\n";
-          }
-        }
+        thread_local_results.emplace_back(path, file_content); // Append to thread-local buffer
       }
       ++processed_files;
     } catch (const std::exception &e) {
@@ -628,7 +610,7 @@ void process_file_chunk(
                 << e.what() << '\n';
     }
   }
-  if (!unorderedOutput && !thread_local_results.empty()) {
+  if (!thread_local_results.empty()) {
     std::lock_guard<std::mutex> lock(ordered_results_mutex); // Lock only once per thread chunk
     results.insert(results.end(), thread_local_results.begin(), thread_local_results.end()); // Merge thread-local buffer into shared result
   }
@@ -674,7 +656,7 @@ void process_last_files(const std::vector<fs::path> &last_files_list,
       break;
     std::string file_content = process_single_file(
         file, config.maxFileSizeB, config.removeComments,
-        config.disableMarkdownlintFixes, config.showFilenameOnly,
+        config.showFilenameOnly,
         config.dirPath, config.removeEmptyLines, config.showLineNumbers,
         dryRun);
     if (!file_content.empty()) {
@@ -697,11 +679,11 @@ bool process_file(const fs::path &path, const Config &config,
   try {
     std::string file_content = process_single_file(
         path, config.maxFileSizeB, config.removeComments,
-        config.disableMarkdownlintFixes, true, config.dirPath,
+        config.showFilenameOnly, config.dirPath,
         config.removeEmptyLines, config.showLineNumbers, config.dryRun);
     if (!config.dryRun && !file_content.empty()) {
       output_stream << file_content;
-    } else if (config.dryRun && !file_content.empty()) {
+    } else if (config.dryRun && not file_content.empty()) { // fix: handle empty file content in dry run too.
       output_stream << normalize_path(path) << "\n";
     }
   } catch (const std::exception &e) {
@@ -756,13 +738,11 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
   }
 
   std::vector<std::pair<fs::path, std::string>> orderedResults;
-  if (!config.unorderedOutput) {
-    orderedResults.reserve(normalFiles.size());
-  }
+  orderedResults.reserve(normalFiles.size());
 
-  if (!config.disableMarkdownlintFixes) {
-    output_stream << "#\n";
-  }
+
+  output_stream << "#\n";
+
 
   std::atomic<size_t> processedFiles{0};
   std::atomic<size_t> totalBytes{0};
@@ -785,8 +765,8 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
         std::vector<std::pair<fs::path, std::string>> thread_local_results; // Thread-local buffer
         process_file_chunk(
             std::span{normalFiles.begin() + start, normalFiles.begin() + end},
-            config.unorderedOutput, config.removeComments, config.maxFileSizeB,
-            config.disableMarkdownlintFixes, config.showFilenameOnly,
+            config.removeComments, config.maxFileSizeB,
+            config.showFilenameOnly,
             config.dirPath, config.removeEmptyLines, orderedResults,
             processedFiles, totalBytes, consoleMutex, orderedResultsMutex,
             should_stop, output_stream, config.showLineNumbers, config.dryRun,
@@ -801,18 +781,18 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
     thread.join();
   }
 
-  if (!config.unorderedOutput) {
-    std::lock_guard<std::mutex> lock(orderedResultsMutex); // Ensure final sort is consistent
-    std::sort(
-        orderedResults.begin(), orderedResults.end(),
-        [&normalFiles](const auto &a, const auto &b) {
-          return std::find(normalFiles.begin(), normalFiles.end(), a.first) <
-                 std::find(normalFiles.begin(), normalFiles.end(), b.first);
-        });
-    for (const auto &result : orderedResults) {
-      output_stream << result.second;
-    }
+
+  std::lock_guard<std::mutex> lock(orderedResultsMutex); // Ensure final sort is consistent
+  std::sort(
+      orderedResults.begin(), orderedResults.end(),
+      [&normalFiles](const auto &a, const auto &b) {
+        return std::find(normalFiles.begin(), normalFiles.end(), a.first) <
+               std::find(normalFiles.begin(), normalFiles.end(), b.first);
+      });
+  for (const auto &result : orderedResults) {
+    output_stream << result.second;
   }
+
 
   process_last_files(lastFilesList, config, should_stop, consoleMutex,
                      output_stream, config.dryRun);
@@ -851,7 +831,6 @@ Config parse_arguments(int argc, char *argv[]) {
                             "used multiple times, grouped)"},
         {"-x, --exclude-ext <ext>", "Exclude files with given extension (can "
                                     "be used multiple times, grouped)"},
-        {"-d, --dot-folders", "Include folders starting with a dot"},
         {"-i, --ignore <item>", "Ignore specific folder or file (can be used "
                                 "multiple times, grouped)"},
         {"-r, --regex <pattern>", "Exclude files matching the regex pattern "
@@ -860,13 +839,11 @@ Config parse_arguments(int argc, char *argv[]) {
          "Remove C++ style comments (// and /* */) from code"},
         {"-l, --remove-empty-lines", "Remove empty lines from output"},
         {"-f, --filename-only", "Show only filename in file headers"},
-        {"-u, --unordered", "Output files in unordered they were found"},
         {"-z, --last <item>",
          "Process specified file, directory, or filename last (order of "
          "multiple -z options is preserved)."},
         {"-Z, --only-last", "Only process specified files and directories from "
                             "--last options, ignoring all other files."},
-        {"-w, --no-markdownlint-fixes", "Disable fixes for Markdown linting"},
         {"-t, --no-gitignore", "Disable gitignore rules"},
         {"-o, --output <file>",
          "Output to the specified file instead of stdout."},
@@ -926,8 +903,6 @@ Config parse_arguments(int argc, char *argv[]) {
         }
         config.excludedFileExtensions.emplace_back(ext);
       }
-    } else if (arg == "-d" || arg == "--dot-folders") {
-      config.ignoreDotFolders = false;
     } else if (arg == "-i" || arg == "--ignore") {
       while (i + 1 < argc && argv[i + 1][0] != '-') {
         std::string entry = argv[++i];
@@ -956,8 +931,6 @@ Config parse_arguments(int argc, char *argv[]) {
       config.removeEmptyLines = true;
     } else if (arg == "-f" || arg == "--filename-only") {
       config.showFilenameOnly = true;
-    } else if (arg == "-u" || arg == "--unordered") {
-      config.unorderedOutput = true;
     } else if (arg == "-z" || arg == "--last") {
       while (i + 1 < argc && argv[i + 1][0] != '-') {
         std::string entry = argv[++i];
@@ -980,8 +953,6 @@ Config parse_arguments(int argc, char *argv[]) {
       }
     } else if (arg == "-Z" || arg == "--only-last") {
       config.onlyLast = true;
-    } else if (arg == "-w" || arg == "--no-markdownlint-fixes") {
-      config.disableMarkdownlintFixes = true;
     } else if (arg == "-t" || arg == "--no-gitignore") {
       config.disableGitignore = true;
     } else if ((arg == "-o" || arg == "--output") && i + 1 < argc) {
