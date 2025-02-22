@@ -27,6 +27,7 @@ DirCat is a high-performance C++ utility that concatenates and displays the cont
 - `-t, --no-gitignore`: Disable `.gitignore` rule processing. By default, DirCat respects `.gitignore` rules in the input directory and its parent directories.
 - `-g, --gitignore <path>`: Use `.gitignore` rules from a specific path instead of the default directory or its parents. If the specified path does not exist or is not a valid `.gitignore` file, a warning will be shown, and gitignore processing might not work as expected.
 - `-o, --output <file>`: Output to the specified file instead of standard output (stdout).
+- `-L, --line-numbers`: Show line numbers in output.
 
 ### Examples
 
@@ -184,6 +185,19 @@ If `-w` (no Markdown linting fixes) is used, the output format is slightly diffe
 ```
 ````
 
+If `-L` (line-numbers) is used, each line of the file content will be prefixed with its line number:
+
+````md
+#
+
+## File: relative/path/to/filename.ext
+
+```ext
+1 | [first line of file contents]
+2 | [second line of file contents]
+...
+````
+
 In all cases, the file extension (if available) is used to indicate the code block's language for syntax highlighting in Markdown.
 
 ## Features
@@ -201,8 +215,9 @@ In all cases, the file extension (if available) is used to indicate the code blo
 - **Prioritized "process last" feature:**  Process specific files and directories at the end, in a defined order, useful for controlling output order (e.g., placing README or important configuration files at the end).
 - **Exclusive "only last" processing:**  Focus solely on the files and directories specified with `--last`, ignoring all other directory content for highly selective processing.
 - **Markdown linting compatibility:**  Output is formatted with Markdown-friendly headers and code blocks, ensuring seamless integration with Markdown rendering and linting tools.
-- **`.gitignore` support:**  Automatically respects `.gitignore` rules, preventing accidental inclusion of unwanted files and directories commonly excluded in Git repositories.
+- **`.gitignore` support:**  Automatically respects `.gitignore` rules, preventing accidental inclusion of unwanted files and directories commonly excluded in Git repositories.  It recursively checks `.gitignore` files in parent directories.
 - **Customizable `.gitignore` path:**  Allows specifying a custom `.gitignore` file path for projects with non-standard gitignore configurations.
+- **Line numbers in output:** Option to display line numbers prepended to each line of file content.
 - **Output redirection to file:**  Save the concatenated output directly to a file instead of displaying it in the console.
 - **Graceful interrupt handling:**  Stops processing and exits cleanly upon receiving an interrupt signal (e.g., Ctrl+C).
 - **Memory-efficient design:**  Processes files in a streaming manner to handle large files without excessive memory usage.
@@ -251,7 +266,7 @@ In all cases, the file extension (if available) is used to indicate the code blo
 - Implements comment removal by parsing the code and tracking comment contexts (single-line and multi-line), string literals, and character literals to avoid accidental removal of code-like comment markers within strings or characters.
 - Employs buffered reading for efficient file input and output operations.
 - Supports flexible ordering of output, including the ability to process specific files or directories last, maintaining a user-defined order for these "last" items.
-- Implements `.gitignore` rule matching logic, supporting wildcards (`*`, `?`), directory patterns (`dir/`), negation (`!rule`), and correctly handles the precedence of rules as defined in the gitignore specification.
+- Implements `.gitignore` rule matching logic, supporting wildcards (`*`, `?`), directory patterns (`dir/`), negation (`!rule`), and correctly handles the precedence of rules as defined in the gitignore specification. It now recursively loads `.gitignore` rules from parent directories.
 
 ## Error Handling
 
