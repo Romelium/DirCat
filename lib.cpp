@@ -11,6 +11,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -58,12 +59,23 @@ std::string normalize_path(const fs::path &path) {
   return path_str;
 }
 
+// Static cache for loaded gitignore rules
+static std::unordered_map<std::string, std::vector<std::string>>
+    gitignore_rules_cache;
+
 std::vector<std::string> load_gitignore_rules(const fs::path &gitignore_path) {
+  std::string cache_key = normalize_path(gitignore_path);
+
+  if (gitignore_rules_cache.count(cache_key)) {
+    return gitignore_rules_cache[cache_key];
+  }
+
   std::vector<std::string> rules;
   std::ifstream file(gitignore_path);
   if (!file.is_open()) {
     std::cerr << "ERROR: Could not open gitignore file: "
               << normalize_path(gitignore_path) << '\n';
+    gitignore_rules_cache[cache_key] = rules; // Cache empty rules on error
     return rules;
   }
   std::string line;
@@ -73,10 +85,13 @@ std::vector<std::string> load_gitignore_rules(const fs::path &gitignore_path) {
       rules.push_back(line);
     }
   }
+  gitignore_rules_cache[cache_key] = rules;
   return rules;
 }
 
-bool matches_gitignore_rule(const fs::path &path, const std::string &rule) {
+bool matches_gitignore_rule(
+    const fs::path &path, const std::string &rule,
+    std::unordered_map<std::string, std::regex> &regex_cache) {
   std::string path_str = path.string();
   std::string rule_str = rule;
 
@@ -93,20 +108,27 @@ bool matches_gitignore_rule(const fs::path &path, const std::string &rule) {
     std::string rule_prefix = rule_str.substr(0, rule_str.length() - 1);
     if (path_str.rfind(rule_prefix, 0) == 0)
       return true;
-  } else if (rule_str.find('*') != std::string::npos) {
+  } else if (rule_str.find('*') != std::string::npos ||
+             rule_str.find('?') != std::string::npos) {
     std::regex regex_rule;
-    std::string regex_pattern;
-    for (char c : rule_str) {
-      if (c == '*')
-        regex_pattern += ".*";
-      else if (c == '?')
-        regex_pattern += ".";
-      else if (c == '.')
-        regex_pattern += "\\.";
-      else
-        regex_pattern += c;
+    if (regex_cache.count(rule_str)) {
+      regex_rule = regex_cache[rule_str];
+    } else {
+      std::string regex_pattern;
+      for (char c : rule_str) {
+        if (c == '*')
+          regex_pattern += ".*";
+        else if (c == '?')
+          regex_pattern += ".";
+        else if (c == '.')
+          regex_pattern += "\\.";
+        else
+          regex_pattern += c;
+      }
+      regex_rule = std::regex("^" + regex_pattern + "$", std::regex::icase);
+      regex_cache[rule_str] = regex_rule;
     }
-    regex_rule = std::regex("^" + regex_pattern + "$", std::regex::icase);
+
     if (std::regex_match(path_str, regex_rule))
       return true;
   } else {
@@ -118,6 +140,7 @@ bool matches_gitignore_rule(const fs::path &path, const std::string &rule) {
 
 bool is_path_ignored_by_gitignore(const fs::path &path,
                                   const fs::path &base_path) {
+  // Explicitly ignore .git directory
   for (const auto &component : path) {
     if (component == ".git") {
       return true;
@@ -127,6 +150,8 @@ bool is_path_ignored_by_gitignore(const fs::path &path,
   std::vector<std::string> accumulated_rules;
   fs::path current_path = path.parent_path();
   fs::path current_base = base_path;
+  std::unordered_map<std::string, std::regex>
+      local_regex_cache; // Local regex cache
 
   while (current_path != current_base.parent_path() &&
          current_path.has_relative_path()) {
@@ -154,12 +179,17 @@ bool is_path_ignored_by_gitignore(const fs::path &path,
   }
 
   bool ignored = false;
+  bool last_ignore_rule_matched = false;
+
   for (const auto &rule : accumulated_rules) {
-    if (matches_gitignore_rule(relative_path, rule)) {
-      if (rule.rfind("!", 0) == 0)
+    if (matches_gitignore_rule(relative_path, rule, local_regex_cache)) {
+      if (rule.rfind("!", 0) == 0) {
         ignored = false;
-      else
+        last_ignore_rule_matched = false;
+      } else {
         ignored = true;
+        last_ignore_rule_matched = true;
+      }
     }
   }
   return ignored;
