@@ -124,16 +124,30 @@ void test_is_path_ignored_by_gitignore() {
   config.dirPath = "test_dir";
   config.gitignorePath = "test_dir/.gitignore";
 
+  // --- Existing tests (still valid and important) ---
   assert(is_path_ignored_by_gitignore("test_dir/file2.txt", config.dirPath) ==
          true);
   assert(is_path_ignored_by_gitignore("test_dir/file1.cpp", config.dirPath) ==
          false);
-  // assert(is_path_ignored_by_gitignore("test_dir/.hidden_dir/file.cpp",
-  //                                     config.gitignoreRules,
-  //                                     config.dirPath) == true);
-  // assert(is_path_ignored_by_gitignore("test_dir/not_ignored_folder/file8.cpp",
-  //                                     config.gitignoreRules,
-  //                                     config.dirPath) == false); // Negation
+  assert(is_path_ignored_by_gitignore("test_dir/.hidden_dir/file.cpp",
+                                      config.dirPath) == true);
+  assert(is_path_ignored_by_gitignore("test_dir/not_ignored_folder/file8.cpp",
+                                      config.dirPath) == false);
+  assert(is_path_ignored_by_gitignore("test_dir/ignored_folder/file7.cpp",
+                                      config.dirPath) == true);
+
+  // --- Added tests for case-insensitivity ---
+
+  // Test case variation in extension case for *.txt rule
+  assert(is_path_ignored_by_gitignore("test_dir/FILE2.TXT", config.dirPath) ==
+         true); // Uppercase extension
+  assert(is_path_ignored_by_gitignore("test_dir/file2.TxT", config.dirPath) ==
+         true); // Mixed case extension
+  assert(is_path_ignored_by_gitignore("test_dir/file2.tXt", config.dirPath) ==
+         true); // More mixed case
+  assert(is_path_ignored_by_gitignore("test_dir/file2.TXt", config.dirPath) ==
+         true); // Even more mixed case
+
   std::cout << "Is path ignored by single gitignore test passed\n";
 }
 

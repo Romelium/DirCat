@@ -80,6 +80,10 @@ bool matches_gitignore_rule(const fs::path &path, const std::string &rule) {
   std::string path_str = path.string();
   std::string rule_str = rule;
 
+  // Normalize path separators: replace backslashes with forward slashes
+  std::replace(path_str.begin(), path_str.end(), '\\', '/');
+  std::replace(rule_str.begin(), rule_str.end(), '\\', '/');
+
   bool negate = false;
   if (!rule_str.empty() && rule_str[0] == '!') {
     negate = true;
@@ -104,7 +108,9 @@ bool matches_gitignore_rule(const fs::path &path, const std::string &rule) {
         regex_pattern += c;
       }
     }
-    regex_rule = std::regex("^" + regex_pattern + "$");
+    regex_rule =
+        std::regex("^" + regex_pattern + "$",
+                   std::regex::icase); // Keep case-insensitive matching
     if (std::regex_match(path_str, regex_rule)) {
       return true; // Wildcard rule matches
     }
@@ -119,7 +125,8 @@ bool matches_gitignore_rule(const fs::path &path, const std::string &rule) {
 bool is_path_ignored_by_gitignore(const fs::path &path,
                                   const fs::path &base_path) {
   std::vector<std::string> accumulated_rules;
-  fs::path current_path = path;
+  fs::path current_path =
+      path.parent_path(); // Start from parent to check gitignore in parent dirs
   fs::path current_base = base_path;
 
   while (current_path != current_base.parent_path() &&
