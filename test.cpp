@@ -49,8 +49,30 @@ void create_test_directory_structure() {
   create_test_file("test_dir/not_ignored_folder/file8.cpp", "// Not ignored");
 }
 
+// Creates a test directory structure for gitignore testing in
+// "test_dir_gitignore".
+void create_test_directory_gitignore_structure() {
+  fs::remove_all("test_dir_gitignore");
+  fs::create_directories("test_dir_gitignore/subdir1");
+  fs::create_directories("test_dir_gitignore/subdir2");
+
+  create_test_file("test_dir_gitignore/.gitignore", "*.level1");
+  create_test_file("test_dir_gitignore/subdir1/.gitignore",
+                   "*.level2\n!important.level2");
+  create_test_file("test_dir_gitignore/file1.level1", "level1 file in root");
+  create_test_file("test_dir_gitignore/subdir1/file2.level2",
+                   "level2 file in subdir1");
+  create_test_file("test_dir_gitignore/subdir1/important.level2",
+                   "important level2 file in subdir1");
+  create_test_file("test_dir_gitignore/subdir2/file3.level1",
+                   "level1 file in subdir2");
+}
+
 // Cleans up the "test_dir" directory.
 void cleanup_test_directory() { fs::remove_all("test_dir"); }
+void cleanup_test_directory_gitignore() {
+  fs::remove_all("test_dir_gitignore");
+}
 
 // Captures stdout output for testing console output.
 std::string capture_stdout(const std::function<void()> &func) {
@@ -115,7 +137,30 @@ void test_is_path_ignored_by_gitignore() {
   // assert(is_path_ignored_by_gitignore("test_dir/not_ignored_folder/file8.cpp",
   //                                     config.gitignoreRules,
   //                                     config.dirPath) == false); // Negation
-  std::cout << "Is path ignored by gitignore test passed\n";
+  std::cout << "Is path ignored by single gitignore test passed\n";
+}
+
+void test_is_path_ignored_by_gitignore_multi_level() {
+  create_test_directory_gitignore_structure();
+  Config config;
+  config.dirPath = "test_dir_gitignore";
+
+  auto check_ignored = [&](const fs::path &path) {
+    return is_path_ignored_by_gitignore(
+        path, {},
+        config
+            .dirPath); // Empty initial rules, rules are loaded in function now
+  };
+
+  assert(check_ignored("test_dir_gitignore/file1.level1") == true);
+  assert(check_ignored("test_dir_gitignore/subdir1/file2.level2") == true);
+  assert(check_ignored("test_dir_gitignore/subdir1/important.level2") == false);
+  assert(check_ignored("test_dir_gitignore/subdir2/file3.level1") == true);
+  assert(check_ignored("test_dir_gitignore/subdir1/file4.txt") ==
+         false); // Not ignored by any rule
+
+  cleanup_test_directory_gitignore();
+  std::cout << "Is path ignored by multi-level gitignore test passed\n";
 }
 
 void test_is_file_size_valid() {
@@ -460,7 +505,8 @@ int main() {
     test_process_file_chunk_unordered();
     test_process_file_chunk_ordered();
     test_output_to_file();
-    test_format_file_output_line_numbers(); // Added line numbers test
+    test_format_file_output_line_numbers();          // Added line numbers test
+    test_is_path_ignored_by_gitignore_multi_level(); // Multi gitignore test
 
     cleanup_test_directory();
     std::cout << "\nAll tests passed successfully!\n";
