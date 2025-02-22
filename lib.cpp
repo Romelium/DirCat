@@ -35,7 +35,6 @@ struct Config {
   std::vector<fs::path> lastDirs;
   bool disableMarkdownlintFixes = false;
   bool disableGitignore = false;
-  fs::path gitignorePath;
   bool onlyLast = false;
   fs::path outputFile;
   bool showLineNumbers = false;
@@ -640,18 +639,6 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
     return false;
   }
 
-  if (!config.disableGitignore) {
-    if (config.gitignorePath.empty()) {
-      config.gitignorePath = config.dirPath / ".gitignore";
-    }
-    if (!config.disableGitignore && !fs::exists(config.gitignorePath)) {
-      std::cerr
-          << "WARNING: Gitignore option used but no gitignore file found at: "
-          << normalize_path(config.gitignorePath) << ". Ignoring gitignore.\n"; // Granular error reporting: path
-      config.disableGitignore = true;
-    }
-  }
-
   auto [normalFiles, lastFilesList] = collect_files(config, should_stop);
 
   if (config.dryRun) { // Dry run mode: print file paths and exit
@@ -798,7 +785,6 @@ Config parse_arguments(int argc, char *argv[]) {
                             "--last options, ignoring all other files."},
         {"-w, --no-markdownlint-fixes", "Disable fixes for Markdown linting"},
         {"-t, --no-gitignore", "Disable gitignore rules"},
-        {"-g, --gitignore <path>", "Use gitignore rules from a specific path."},
         {"-o, --output <file>",
          "Output to the specified file instead of stdout."},
         {"-L, --line-numbers", "Show line numbers in output."},
@@ -907,19 +893,6 @@ Config parse_arguments(int argc, char *argv[]) {
       config.disableMarkdownlintFixes = true;
     } else if (arg == "-t" || arg == "--no-gitignore") {
       config.disableGitignore = true;
-    } else if (arg == "-g" || arg == "--gitignore") {
-      config.disableGitignore = false;
-      if (i + 1 >= argc || argv[i + 1][0] == '-') {
-        std::cerr << "ERROR: --gitignore option requires a path to the "
-                     "gitignore file.\n";
-        exit(1);
-      }
-      config.gitignorePath = argv[++i];
-      if (!fs::exists(config.gitignorePath)) {
-        std::cerr << "WARNING: Gitignore file not found at: "
-                  << normalize_path(config.gitignorePath) // Granular error reporting: path
-                  << ". Using gitignore might not work as expected.\n";
-      }
     } else if ((arg == "-o" || arg == "--output") && i + 1 < argc) {
       config.outputFile = argv[++i];
     } else if (arg == "-L" || arg == "--line-numbers") {

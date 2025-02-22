@@ -115,7 +115,6 @@ void test_load_gitignore_rules() {
 void test_is_path_ignored_by_gitignore() {
   Config config;
   config.dirPath = "test_dir";
-  config.gitignorePath = "test_dir/.gitignore";
 
   assert(is_path_ignored_by_gitignore("test_dir/file2.txt", config.dirPath) ==
          true);
@@ -196,7 +195,6 @@ void test_is_file_extension_allowed() {
 void test_should_ignore_folder() {
   Config base_config;
   base_config.dirPath = "test_dir";
-  base_config.gitignorePath = "test_dir/.gitignore";
 
   assert(should_ignore_folder("test_dir/.hidden_dir",
                               base_config.disableGitignore, base_config.dirPath,
@@ -219,7 +217,6 @@ void test_should_ignore_folder() {
 void test_should_ignore_file() {
   Config base_config;
   base_config.dirPath = "test_dir";
-  base_config.gitignorePath = "test_dir/.gitignore";
   base_config.maxFileSizeB = 2048;
 
   create_test_file("test_dir/ignore_me.txt", "ignore");
