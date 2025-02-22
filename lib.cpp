@@ -534,7 +534,8 @@ void process_file_chunk(
             output_stream << file_content;
           } else {
             std::lock_guard<std::mutex> lock(console_mutex);
-            output_stream << normalize_path(path) << "\n";
+            output_stream << normalize_path(fs::relative(path, dirPath))
+                          << "\n";
           }
         }
       }
@@ -595,7 +596,8 @@ void process_last_files(const std::vector<fs::path> &last_files_list,
         output_stream << file_content;
       } else {
         std::lock_guard<std::mutex> lock(console_mutex);
-        output_stream << normalize_path(file) << "\n";
+        output_stream << normalize_path(fs::relative(file, config.dirPath))
+                      << "\n";
       }
     }
   }
@@ -632,13 +634,28 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
 
   auto [normalFiles, lastFilesList] = collect_files(config, should_stop);
 
+  std::ofstream outputFileStream;
+  std::ostream *outputPtr = &std::cout;
+  if (!config.outputFile.empty()) {
+    outputFileStream.open(config.outputFile);
+    if (!outputFileStream.is_open()) {
+      std::cerr << "ERROR: Could not open output file: "
+                << normalize_path(config.outputFile) << '\n';
+      return false;
+    }
+    outputPtr = &outputFileStream;
+  }
+  std::ostream &output_stream = *outputPtr;
+
   if (config.dryRun) {
     std::cout << "Files to be processed:\n";
     for (const auto &file : normalFiles) {
-      std::cout << normalize_path(file) << "\n";
+      output_stream << normalize_path(fs::relative(file, config.dirPath))
+                    << "\n";
     }
     for (const auto &file : lastFilesList) {
-      std::cout << normalize_path(file) << "\n";
+      output_stream << normalize_path(fs::relative(file, config.dirPath))
+                    << "\n";
     }
     return true;
   }
@@ -655,19 +672,6 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
   if (!config.unorderedOutput) {
     orderedResults.reserve(normalFiles.size());
   }
-
-  std::ofstream outputFileStream;
-  std::ostream *outputPtr = &std::cout;
-  if (!config.outputFile.empty()) {
-    outputFileStream.open(config.outputFile);
-    if (!outputFileStream.is_open()) {
-      std::cerr << "ERROR: Could not open output file: "
-                << normalize_path(config.outputFile) << '\n';
-      return false;
-    }
-    outputPtr = &outputFileStream;
-  }
-  std::ostream &output_stream = *outputPtr;
 
   if (!config.disableMarkdownlintFixes) {
     output_stream << "#\n";
@@ -797,7 +801,13 @@ Config parse_arguments(int argc, char *argv[]) {
     exit(1);
   }
 
-  config.dirPath = argv[1];
+  try {
+    config.dirPath = fs::canonical(argv[1]);
+  } catch (const std::exception &e) {
+    std::cerr << "ERROR: Could not canonicalize path: "
+              << config.dirPath.string() << ": " << e.what() << '\n';
+    exit(1);
+  }
 
   for (int i = 2; i < argc; ++i) {
     std::string_view arg = argv[i];

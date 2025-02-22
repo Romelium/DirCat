@@ -458,19 +458,18 @@ void test_dry_run_mode() {
       capture_stdout([&]() { process_directory(config, should_stop); });
 
   assert(output.find("Files to be processed:") != std::string::npos);
-  assert(output.find("test_dir/file1.cpp") != std::string::npos);
-  assert(output.find("test_dir/FILE3.HPP") != std::string::npos);
-  assert(output.find("test_dir/file5") ==
+  assert(output.find("file1.cpp") != std::string::npos);
+  assert(output.find("FILE3.HPP") != std::string::npos);
+  assert(output.find("file5") ==
          std::string::npos); // files with no extentions are currently ignored
-  assert(output.find("test_dir/subdir1/file6.cpp") != std::string::npos);
-  assert(output.find("test_dir/not_ignored_folder/file8.cpp") !=
-         std::string::npos);
-  assert(output.find("test_dir/file2.txt") == std::string::npos); // gitignore
-  assert(output.find("test_dir/.hidden_file.cpp") !=
+  assert(output.find("subdir1/file6.cpp") != std::string::npos);
+  assert(output.find("not_ignored_folder/file8.cpp") != std::string::npos);
+  assert(output.find("file2.txt") == std::string::npos); // gitignore
+  assert(output.find(".hidden_file.cpp") !=
          std::string::npos); // .hidden_file.cpp is not a dot folder
-  assert(output.find("test_dir/ignored_folder/file7.cpp") ==
+  assert(output.find("ignored_folder/file7.cpp") ==
          std::string::npos); // ignored folder and gitignore
-  assert(output.find("test_dir/file4.excluded") !=
+  assert(output.find("file4.excluded") !=
          std::string::npos); // .excluded is not excluded
   assert(output.find("## File:") ==
          std::string::npos); // No file content formatting
