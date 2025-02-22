@@ -1,13 +1,6 @@
-#include <cassert>
-#include <filesystem>
-#include <fstream>
-#include <functional>
-#include <iostream>
-#include <sstream>
-#include <string>
-#include <vector>
-
 #include "lib.cpp"
+#include <cassert>
+#include <functional>
 
 namespace fs = std::filesystem;
 
@@ -115,26 +108,38 @@ void test_load_gitignore_rules() {
 void test_is_path_ignored_by_gitignore() {
   Config config;
   config.dirPath = "test_dir";
+  std::unordered_map<std::string, std::vector<std::string>> dir_gitignore_rules;
 
-  assert(is_path_ignored_by_gitignore("test_dir/file2.txt", config.dirPath) ==
-         true);
-  assert(is_path_ignored_by_gitignore("test_dir/file1.cpp", config.dirPath) ==
-         false);
+  std::vector<std::string> rules = load_gitignore_rules("test_dir/.gitignore");
+  dir_gitignore_rules[normalize_path(config.dirPath)] = rules;
+
+  bool ignored = is_path_ignored_by_gitignore(
+      "test_dir/file2.txt", config.dirPath, dir_gitignore_rules);
+  if (!ignored) {
+    std::cerr << "Assertion failed for test_dir/file2.txt, expected ignored by "
+                 "gitignore\n";
+  }
+  assert(ignored == true);
+  assert(is_path_ignored_by_gitignore("test_dir/file1.cpp", config.dirPath,
+                                      dir_gitignore_rules) == false);
   assert(is_path_ignored_by_gitignore("test_dir/.hidden_dir/file.cpp",
-                                      config.dirPath) == true);
+                                      config.dirPath,
+                                      dir_gitignore_rules) == true);
   assert(is_path_ignored_by_gitignore("test_dir/not_ignored_folder/file8.cpp",
-                                      config.dirPath) == false);
+                                      config.dirPath,
+                                      dir_gitignore_rules) == false);
   assert(is_path_ignored_by_gitignore("test_dir/ignored_folder/file7.cpp",
-                                      config.dirPath) == true);
+                                      config.dirPath,
+                                      dir_gitignore_rules) == true);
 
-  assert(is_path_ignored_by_gitignore("test_dir/FILE2.TXT", config.dirPath) ==
-         true);
-  assert(is_path_ignored_by_gitignore("test_dir/file2.TxT", config.dirPath) ==
-         true);
-  assert(is_path_ignored_by_gitignore("test_dir/file2.tXt", config.dirPath) ==
-         true);
-  assert(is_path_ignored_by_gitignore("test_dir/file2.TXt", config.dirPath) ==
-         true);
+  assert(is_path_ignored_by_gitignore("test_dir/FILE2.TXT", config.dirPath,
+                                      dir_gitignore_rules) == true);
+  assert(is_path_ignored_by_gitignore("test_dir/file2.TxT", config.dirPath,
+                                      dir_gitignore_rules) == true);
+  assert(is_path_ignored_by_gitignore("test_dir/file2.tXt", config.dirPath,
+                                      dir_gitignore_rules) == true);
+  assert(is_path_ignored_by_gitignore("test_dir/file2.TXt", config.dirPath,
+                                      dir_gitignore_rules) == true);
 
   std::cout << "Is path ignored by single gitignore test passed\n";
 }
@@ -143,9 +148,15 @@ void test_is_path_ignored_by_gitignore_multi_level() {
   create_test_directory_gitignore_structure();
   Config config;
   config.dirPath = "test_dir_gitignore";
+  std::unordered_map<std::string, std::vector<std::string>> dir_gitignore_rules;
+  dir_gitignore_rules[normalize_path(config.dirPath)] =
+      load_gitignore_rules(config.dirPath / ".gitignore");
+  dir_gitignore_rules[normalize_path(config.dirPath / "subdir1")] =
+      load_gitignore_rules(config.dirPath / "subdir1" / ".gitignore");
 
   auto check_ignored = [&](const fs::path &path) {
-    return is_path_ignored_by_gitignore(path, config.dirPath);
+    return is_path_ignored_by_gitignore(path, config.dirPath,
+                                        dir_gitignore_rules);
   };
 
   assert(check_ignored("test_dir_gitignore/file1.level1") == true);
@@ -195,22 +206,25 @@ void test_is_file_extension_allowed() {
 void test_should_ignore_folder() {
   Config base_config;
   base_config.dirPath = "test_dir";
+  std::unordered_map<std::string, std::vector<std::string>> dir_gitignore_rules;
+  std::vector<std::string> rules = load_gitignore_rules("test_dir/.gitignore");
+  dir_gitignore_rules[normalize_path(base_config.dirPath)] = rules;
 
-  assert(should_ignore_folder("test_dir/.hidden_dir",
-                              base_config.disableGitignore, base_config.dirPath,
-                              base_config.ignoreDotFolders,
-                              base_config.ignoredFolders) == true);
-  assert(should_ignore_folder("test_dir/ignored_folder",
-                              base_config.disableGitignore, base_config.dirPath,
-                              base_config.ignoreDotFolders,
-                              base_config.ignoredFolders) == true);
-  assert(should_ignore_folder("test_dir/not_ignored_folder",
-                              base_config.disableGitignore, base_config.dirPath,
-                              base_config.ignoreDotFolders,
-                              base_config.ignoredFolders) == false);
+  assert(should_ignore_folder(
+             "test_dir/.hidden_dir", base_config.disableGitignore,
+             base_config.dirPath, base_config.ignoreDotFolders,
+             base_config.ignoredFolders, dir_gitignore_rules) == true);
+  assert(should_ignore_folder(
+             "test_dir/ignored_folder", base_config.disableGitignore,
+             base_config.dirPath, base_config.ignoreDotFolders,
+             base_config.ignoredFolders, dir_gitignore_rules) == true);
+  assert(should_ignore_folder(
+             "test_dir/not_ignored_folder", base_config.disableGitignore,
+             base_config.dirPath, base_config.ignoreDotFolders,
+             base_config.ignoredFolders, dir_gitignore_rules) == false);
   assert(should_ignore_folder("test_dir/subdir1", base_config.disableGitignore,
                               base_config.dirPath, base_config.ignoreDotFolders,
-                              {"subdir1"}) == true);
+                              {"subdir1"}, dir_gitignore_rules) == true);
   std::cout << "Should ignore folder test passed\n";
 }
 
@@ -218,24 +232,29 @@ void test_should_ignore_file() {
   Config base_config;
   base_config.dirPath = "test_dir";
   base_config.maxFileSizeB = 2048;
+  std::unordered_map<std::string, std::vector<std::string>> dir_gitignore_rules;
+  std::vector<std::string> rules = load_gitignore_rules("test_dir/.gitignore");
+  dir_gitignore_rules[normalize_path(base_config.dirPath)] = rules;
 
   create_test_file("test_dir/ignore_me.txt", "ignore");
   create_test_file("test_dir/large_ignore.cpp", std::string(4096, 'I'));
 
   assert(should_ignore_file("test_dir/file2.txt", base_config.disableGitignore,
                             base_config.dirPath, base_config.maxFileSizeB,
-                            base_config.ignoredFiles) == true);
+                            base_config.ignoredFiles,
+                            dir_gitignore_rules) == true);
   assert(should_ignore_file("test_dir/ignore_me.txt",
                             base_config.disableGitignore, base_config.dirPath,
-                            base_config.maxFileSizeB,
-                            {"ignore_me.txt"}) == true);
+                            base_config.maxFileSizeB, {"ignore_me.txt"},
+                            dir_gitignore_rules) == true);
   assert(should_ignore_file("test_dir/large_file.cpp",
                             base_config.disableGitignore, base_config.dirPath,
-                            base_config.maxFileSizeB,
-                            base_config.ignoredFiles) == true);
+                            base_config.maxFileSizeB, base_config.ignoredFiles,
+                            dir_gitignore_rules) == true);
   assert(should_ignore_file("test_dir/file1.cpp", base_config.disableGitignore,
                             base_config.dirPath, base_config.maxFileSizeB,
-                            base_config.ignoredFiles) == false);
+                            base_config.ignoredFiles,
+                            dir_gitignore_rules) == false);
   fs::remove("test_dir/ignore_me.txt");
   fs::remove("test_dir/large_ignore.cpp");
   std::cout << "Should ignore file test passed\n";
@@ -372,6 +391,7 @@ void test_process_file_chunk_unordered() {
   std::mutex console_mutex;
   std::mutex ordered_results_mutex;
   std::atomic<bool> should_stop{false};
+  std::vector<std::pair<fs::path, std::string>> thread_local_results;
 
   std::string output = capture_stdout([&]() {
     process_file_chunk(
@@ -380,7 +400,7 @@ void test_process_file_chunk_unordered() {
         config.disableMarkdownlintFixes, config.showFilenameOnly,
         config.dirPath, config.removeEmptyLines, results, processed_files,
         total_bytes, console_mutex, ordered_results_mutex, should_stop,
-        std::cout, false, false);
+        std::cout, false, false, thread_local_results);
   });
 
   assert(processed_files == 2);
@@ -406,6 +426,7 @@ void test_process_file_chunk_ordered() {
   std::mutex console_mutex;
   std::mutex ordered_results_mutex;
   std::atomic<bool> should_stop{false};
+  std::vector<std::pair<fs::path, std::string>> thread_local_results;
 
   capture_stdout([&]() {
     process_file_chunk(
@@ -414,7 +435,7 @@ void test_process_file_chunk_ordered() {
         config.disableMarkdownlintFixes, config.showFilenameOnly,
         config.dirPath, config.removeEmptyLines, results, processed_files,
         total_bytes, console_mutex, ordered_results_mutex, should_stop,
-        std::cout, false, false);
+        std::cout, false, false, thread_local_results);
   });
 
   assert(processed_files == 2);

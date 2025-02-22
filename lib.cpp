@@ -14,6 +14,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <shared_mutex> // For read-write mutex
 
 namespace fs = std::filesystem;
 
@@ -59,15 +60,24 @@ std::string normalize_path(const fs::path &path) {
   return path_str;
 }
 
-// Static cache for loaded gitignore rules
+// Static cache for loaded gitignore rules (directory path -> rules)
 static std::unordered_map<std::string, std::vector<std::string>>
     gitignore_rules_cache;
+static std::shared_mutex gitignore_cache_mutex;
+
+// Static cache for compiled regex patterns (rule string -> regex)
+static std::unordered_map<std::string, std::regex> regex_cache;
+static std::shared_mutex regex_cache_mutex;
+
 
 std::vector<std::string> load_gitignore_rules(const fs::path &gitignore_path) {
   std::string cache_key = normalize_path(gitignore_path);
 
-  if (gitignore_rules_cache.count(cache_key)) {
-    return gitignore_rules_cache[cache_key];
+  {
+    std::shared_lock<std::shared_mutex> lock(gitignore_cache_mutex);
+    if (gitignore_rules_cache.count(cache_key)) {
+      return gitignore_rules_cache[cache_key];
+    }
   }
 
   std::vector<std::string> rules;
@@ -75,7 +85,10 @@ std::vector<std::string> load_gitignore_rules(const fs::path &gitignore_path) {
   if (!file.is_open()) {
     std::cerr << "ERROR: Could not open gitignore file: "
               << normalize_path(gitignore_path) << '\n';
-    gitignore_rules_cache[cache_key] = rules; // Cache empty rules on error
+    {
+      std::unique_lock<std::shared_mutex> lock(gitignore_cache_mutex);
+      gitignore_rules_cache[cache_key] = rules; // Cache empty rules on error
+    }
     return rules;
   }
   std::string line;
@@ -85,13 +98,14 @@ std::vector<std::string> load_gitignore_rules(const fs::path &gitignore_path) {
       rules.push_back(line);
     }
   }
-  gitignore_rules_cache[cache_key] = rules;
+  {
+    std::unique_lock<std::shared_mutex> lock(gitignore_cache_mutex);
+    gitignore_rules_cache[cache_key] = rules;
+  }
   return rules;
 }
 
-bool matches_gitignore_rule(
-    const fs::path &path, const std::string &rule,
-    std::unordered_map<std::string, std::regex> &regex_cache) {
+bool matches_gitignore_rule(const fs::path &path, const std::string &rule) {
   std::string path_str = path.string();
   std::string rule_str = rule;
 
@@ -111,26 +125,32 @@ bool matches_gitignore_rule(
   } else if (rule_str.find('*') != std::string::npos ||
              rule_str.find('?') != std::string::npos) {
     std::regex regex_rule;
-    if (regex_cache.count(rule_str)) {
-      regex_rule = regex_cache[rule_str];
-    } else {
-      std::string regex_pattern;
-      for (char c : rule_str) {
-        if (c == '*')
-          regex_pattern += ".*";
-        else if (c == '?')
-          regex_pattern += ".";
-        else if (c == '.')
-          regex_pattern += "\\.";
-        else
-          regex_pattern += c;
+    {
+      std::shared_lock<std::shared_mutex> lock(regex_cache_mutex);
+      if (regex_cache.count(rule_str)) {
+        regex_rule = regex_cache[rule_str];
+        return std::regex_match(path_str, regex_rule);
       }
-      regex_rule = std::regex("^" + regex_pattern + "$", std::regex::icase);
+    }
+
+    std::string regex_pattern;
+    for (char c : rule_str) {
+      if (c == '*')
+        regex_pattern += ".*";
+      else if (c == '?')
+        regex_pattern += ".";
+      else if (c == '.')
+        regex_pattern += "\\.";
+      else
+        regex_pattern += c;
+    }
+    regex_rule = std::regex("^" + regex_pattern + "$", std::regex::icase);
+    {
+      std::unique_lock<std::shared_mutex> lock(regex_cache_mutex);
       regex_cache[rule_str] = regex_rule;
     }
 
-    if (std::regex_match(path_str, regex_rule))
-      return true;
+    return std::regex_match(path_str, regex_rule);
   } else {
     if (path.filename().string() == rule_str)
       return true;
@@ -139,7 +159,8 @@ bool matches_gitignore_rule(
 }
 
 bool is_path_ignored_by_gitignore(const fs::path &path,
-                                  const fs::path &base_path) {
+                                  const fs::path &base_path,
+                                  const std::unordered_map<std::string, std::vector<std::string>>& dir_gitignore_rules) {
   // Explicitly ignore .git directory
   for (const auto &component : path) {
     if (component == ".git") {
@@ -150,16 +171,13 @@ bool is_path_ignored_by_gitignore(const fs::path &path,
   std::vector<std::string> accumulated_rules;
   fs::path current_path = path.parent_path();
   fs::path current_base = base_path;
-  std::unordered_map<std::string, std::regex>
-      local_regex_cache; // Local regex cache
 
   while (current_path != current_base.parent_path() &&
          current_path.has_relative_path()) {
-    fs::path gitignore_path = current_path / ".gitignore";
-    if (fs::exists(gitignore_path) && fs::is_regular_file(gitignore_path)) {
-      std::vector<std::string> rules = load_gitignore_rules(gitignore_path);
-      accumulated_rules.insert(accumulated_rules.begin(), rules.begin(),
-                               rules.end());
+    std::string normalized_current_path = normalize_path(current_path);
+    if (dir_gitignore_rules.count(normalized_current_path)) {
+      const auto& rules = dir_gitignore_rules.at(normalized_current_path);
+      accumulated_rules.insert(accumulated_rules.begin(), rules.begin(), rules.end());
     }
     if (current_path == current_base)
       break;
@@ -182,7 +200,7 @@ bool is_path_ignored_by_gitignore(const fs::path &path,
   bool last_ignore_rule_matched = false;
 
   for (const auto &rule : accumulated_rules) {
-    if (matches_gitignore_rule(relative_path, rule, local_regex_cache)) {
+    if (matches_gitignore_rule(relative_path, rule)) {
       if (rule.rfind("!", 0) == 0) {
         ignored = false;
         last_ignore_rule_matched = false;
@@ -228,8 +246,9 @@ bool is_file_extension_allowed(
 
 bool should_ignore_folder(const fs::path &path, bool disableGitignore,
                           const fs::path &dirPath, bool ignoreDotFolders,
-                          const std::vector<fs::path> &ignoredFolders) {
-  if (!disableGitignore && is_path_ignored_by_gitignore(path, dirPath))
+                          const std::vector<fs::path> &ignoredFolders,
+                          const std::unordered_map<std::string, std::vector<std::string>>& dir_gitignore_rules) {
+  if (!disableGitignore && is_path_ignored_by_gitignore(path, dirPath, dir_gitignore_rules))
     return true;
   if (ignoreDotFolders && path.filename().string().front() == '.')
     return true;
@@ -254,8 +273,9 @@ bool should_ignore_folder(const fs::path &path, bool disableGitignore,
 bool should_ignore_file(const fs::path &path, bool disableGitignore,
                         const fs::path &dirPath,
                         unsigned long long maxFileSizeB,
-                        const std::vector<fs::path> &ignoredFiles) {
-  if (!disableGitignore && is_path_ignored_by_gitignore(path, dirPath))
+                        const std::vector<fs::path> &ignoredFiles,
+                        const std::unordered_map<std::string, std::vector<std::string>>& dir_gitignore_rules) {
+  if (!disableGitignore && is_path_ignored_by_gitignore(path, dirPath, dir_gitignore_rules))
     return true;
   if (!is_file_size_valid(path, maxFileSizeB))
     return true;
@@ -272,8 +292,21 @@ bool matches_regex_filters(const fs::path &path,
   const std::string filename = path.filename().string();
   for (const auto &regexStr : regex_filters) {
     try {
-      if (std::regex_search(filename, std::regex(regexStr)))
+      {
+        std::shared_lock<std::shared_mutex> lock(regex_cache_mutex);
+        if (regex_cache.count(regexStr)) {
+          if (std::regex_search(filename, regex_cache[regexStr]))
+            return true;
+        }
+      }
+      std::regex compiled_regex(regexStr);
+      {
+        std::unique_lock<std::shared_mutex> lock(regex_cache_mutex);
+        regex_cache[regexStr] = compiled_regex;
+      }
+      if (std::regex_search(filename, compiled_regex))
         return true;
+
     } catch (const std::regex_error &e) {
       std::cerr << "ERROR: Invalid regex: " << regexStr << ": " << e.what()
                 << '\n';
@@ -423,12 +456,25 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
   std::vector<fs::path> normalFiles;
   std::vector<fs::path> lastFilesList;
   std::unordered_set<fs::path> lastFilesSet;
+  std::unordered_map<std::string, std::vector<std::string>> dir_gitignore_rules;
+
+  // Preload gitignore rules for all relevant directories
+  if (!config.disableGitignore) {
+    std::filesystem::recursive_directory_iterator gitignore_it(
+        config.dirPath, fs::directory_options::skip_permission_denied);
+    for (const auto& dir_entry : gitignore_it) {
+      if (dir_entry.is_regular_file() && dir_entry.path().filename() == ".gitignore") {
+        dir_gitignore_rules[normalize_path(dir_entry.path().parent_path())] = load_gitignore_rules(dir_entry.path());
+      }
+    }
+  }
+
 
   auto shouldSkipDirectory = [&](const fs::path &dirPath) {
     return fs::is_directory(dirPath) &&
            should_ignore_folder(dirPath, config.disableGitignore,
                                 config.dirPath, config.ignoreDotFolders,
-                                config.ignoredFolders);
+                                config.ignoredFolders, dir_gitignore_rules);
   };
 
   if (config.onlyLast) {
@@ -462,7 +508,7 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
                                         config.excludedFileExtensions) &&
               !should_ignore_file(it->path(), config.disableGitignore,
                                   config.dirPath, config.maxFileSizeB,
-                                  config.ignoredFiles) &&
+                                  config.ignoredFiles, dir_gitignore_rules) &&
               !matches_regex_filters(it->path(), config.regexFilters)) {
             if (lastFilesSet.insert(it->path()).second) {
               lastFilesList.push_back(it->path());
@@ -495,7 +541,7 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
                                       config.excludedFileExtensions) &&
             !should_ignore_file(it->path(), config.disableGitignore,
                                 config.dirPath, config.maxFileSizeB,
-                                config.ignoredFiles) &&
+                                config.ignoredFiles, dir_gitignore_rules) &&
             !matches_regex_filters(it->path(), config.regexFilters)) {
           if (is_last_file(it->path(), config.dirPath, config.lastFiles,
                            config.lastDirs)) {
@@ -517,7 +563,7 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
                                       config.excludedFileExtensions) &&
             !should_ignore_file(it->path(), config.disableGitignore,
                                 config.dirPath, config.maxFileSizeB,
-                                config.ignoredFiles) &&
+                                config.ignoredFiles, dir_gitignore_rules) &&
             !matches_regex_filters(it->path(), config.regexFilters)) {
           if (is_last_file(it->path(), config.dirPath, config.lastFiles,
                            config.lastDirs)) {
@@ -546,11 +592,13 @@ void process_file_chunk(
     std::span<const fs::path> chunk, bool unorderedOutput, bool removeComments,
     unsigned long long maxFileSizeB, bool disableMarkdownlintFixes,
     bool showFilenameOnly, const fs::path &dirPath, bool removeEmptyLines,
-    std::vector<std::pair<fs::path, std::string>> &results,
+    std::vector<std::pair<fs::path, std::string>> &results, // Shared result vector (for final sort)
     std::atomic<size_t> &processed_files, std::atomic<size_t> &total_bytes,
     std::mutex &console_mutex, std::mutex &ordered_results_mutex,
     std::atomic<bool> &should_stop, std::ostream &output_stream,
-    bool showLineNumbers, bool dryRun) {
+    bool showLineNumbers, bool dryRun,
+    std::vector<std::pair<fs::path, std::string>>& thread_local_results // Thread-local result buffer
+    ) {
   for (const auto &path : chunk) {
     if (should_stop)
       break;
@@ -562,8 +610,7 @@ void process_file_chunk(
         total_bytes += fs::file_size(path);
 
         if (!unorderedOutput) {
-          std::lock_guard<std::mutex> lock(ordered_results_mutex);
-          results.emplace_back(path, file_content);
+          thread_local_results.emplace_back(path, file_content); // Append to thread-local buffer
         } else {
           if (!dryRun) {
             std::lock_guard<std::mutex> lock(console_mutex);
@@ -580,6 +627,10 @@ void process_file_chunk(
       std::cerr << "ERROR: Error processing " << normalize_path(path) << ": "
                 << e.what() << '\n';
     }
+  }
+  if (!unorderedOutput && !thread_local_results.empty()) {
+    std::lock_guard<std::mutex> lock(ordered_results_mutex); // Lock only once per thread chunk
+    results.insert(results.end(), thread_local_results.begin(), thread_local_results.end()); // Merge thread-local buffer into shared result
   }
 }
 
@@ -731,13 +782,15 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
 
     threads.emplace_back([&, start, end] {
       try {
+        std::vector<std::pair<fs::path, std::string>> thread_local_results; // Thread-local buffer
         process_file_chunk(
             std::span{normalFiles.begin() + start, normalFiles.begin() + end},
             config.unorderedOutput, config.removeComments, config.maxFileSizeB,
             config.disableMarkdownlintFixes, config.showFilenameOnly,
             config.dirPath, config.removeEmptyLines, orderedResults,
             processedFiles, totalBytes, consoleMutex, orderedResultsMutex,
-            should_stop, output_stream, config.showLineNumbers, config.dryRun);
+            should_stop, output_stream, config.showLineNumbers, config.dryRun,
+            thread_local_results); // Pass thread-local buffer
       } catch (const std::exception &e) {
         std::cerr << "ERROR: Exception in thread: " << e.what() << '\n';
       }
@@ -749,7 +802,7 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
   }
 
   if (!config.unorderedOutput) {
-    std::lock_guard<std::mutex> lock(orderedResultsMutex);
+    std::lock_guard<std::mutex> lock(orderedResultsMutex); // Ensure final sort is consistent
     std::sort(
         orderedResults.begin(), orderedResults.end(),
         [&normalFiles](const auto &a, const auto &b) {
