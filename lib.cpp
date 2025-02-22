@@ -2,6 +2,7 @@
 #include <atomic>
 #include <filesystem>
 #include <fstream>
+#include <iomanip> // Required for std::setw and std::right
 #include <iostream>
 #include <mutex>
 #include <regex>
@@ -38,6 +39,7 @@ struct Config {
   std::vector<std::string> gitignoreRules;
   bool onlyLast = false;
   fs::path outputFile;
+  bool showLineNumbers = false; // Add this line
 };
 
 // --- Utility Functions ---
@@ -306,7 +308,7 @@ std::string format_file_output(const fs::path &path,
                                bool disableMarkdownlintFixes,
                                bool showFilenameOnly, const fs::path &dirPath,
                                const std::string &file_content,
-                               bool removeEmptyLines) {
+                               bool removeEmptyLines, bool showLineNumbers) {
   std::stringstream content;
   content << (!disableMarkdownlintFixes ? "\n## File: " : "\n### File: ")
           << (!showFilenameOnly ? fs::relative(path, dirPath).string()
@@ -318,12 +320,16 @@ std::string format_file_output(const fs::path &path,
 
   std::istringstream iss(file_content);
   std::string line;
+  int lineNumber = 1; // Initialize line number counter
   while (std::getline(iss, line)) {
     if (!line.empty() && line.back() == '\r')
       line.pop_back();
     if (removeEmptyLines &&
         line.find_first_not_of(" \t\r\n") == std::string::npos)
       continue;
+    if (showLineNumbers) { // Conditionally add line numbers
+      content << lineNumber++ << " | ";
+    }
     content << line << '\n';
   }
   content << "\n```\n";
@@ -336,7 +342,7 @@ std::string process_single_file(const fs::path &path,
                                 bool removeComments,
                                 bool disableMarkdownlintFixes,
                                 bool showFilenameOnly, const fs::path &dirPath,
-                                bool removeEmptyLines) {
+                                bool removeEmptyLines, bool showLineNumbers) {
   std::ifstream file(path, std::ios::binary);
   if (!file || !is_file_size_valid(path, maxFileSizeB)) {
     return ""; // Return empty string if file cannot be opened or size invalid.
@@ -350,7 +356,8 @@ std::string process_single_file(const fs::path &path,
   }
 
   return format_file_output(path, disableMarkdownlintFixes, showFilenameOnly,
-                            dirPath, fileContent, removeEmptyLines);
+                            dirPath, fileContent, removeEmptyLines,
+                            showLineNumbers); // Pass showLineNumbers
 }
 
 // --- File Collection ---
@@ -515,14 +522,15 @@ void process_file_chunk(std::span<const fs::path> chunk, bool unorderedOutput,
                         std::mutex &console_mutex,
                         std::mutex &ordered_results_mutex,
                         std::atomic<bool> &should_stop,
-                        std::ostream &output_stream) { // Pass output_stream
+                        std::ostream &output_stream, bool showLineNumbers) {
   for (const auto &path : chunk) {
     if (should_stop)
       break;
     try {
       std::string file_content = process_single_file(
           path, maxFileSizeB, removeComments, disableMarkdownlintFixes,
-          showFilenameOnly, dirPath, removeEmptyLines);
+          showFilenameOnly, dirPath, removeEmptyLines,
+          showLineNumbers); // Pass showLineNumbers
       if (!file_content.empty()) {
         total_bytes += fs::file_size(path);
 
@@ -586,7 +594,8 @@ void process_last_files(const std::vector<fs::path> &last_files_list,
     std::string file_content = process_single_file(
         file, config.maxFileSizeB, config.removeComments,
         config.disableMarkdownlintFixes, config.showFilenameOnly,
-        config.dirPath, config.removeEmptyLines);
+        config.dirPath, config.removeEmptyLines,
+        config.showLineNumbers); // Pass showLineNumbers
     if (!file_content.empty()) {
       std::lock_guard<std::mutex> lock(
           console_mutex);            // Lock for console output.
@@ -603,7 +612,8 @@ bool process_file(const fs::path &path, const Config &config,
     std::string file_content =
         process_single_file(path, config.maxFileSizeB, config.removeComments,
                             config.disableMarkdownlintFixes, true,
-                            config.dirPath, config.removeEmptyLines);
+                            config.dirPath, config.removeEmptyLines,
+                            config.showLineNumbers); // Pass showLineNumbers
     if (!file_content.empty()) {
       output_stream << file_content; // Use output_stream
     }
@@ -696,7 +706,8 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
             config.disableMarkdownlintFixes, config.showFilenameOnly,
             config.dirPath, config.removeEmptyLines, orderedResults,
             processedFiles, totalBytes, consoleMutex, orderedResultsMutex,
-            should_stop, output_stream); // Pass output_stream
+            should_stop, output_stream,
+            config.showLineNumbers); // Pass showLineNumbers
       } catch (const std::exception &e) {
         std::cerr << "ERROR: Exception in thread: " << e.what() << '\n';
       }
@@ -779,6 +790,7 @@ Config parse_arguments(int argc, char *argv[]) {
         {"-g, --gitignore <path>", "Use gitignore rules from a specific path."},
         {"-o, --output <file>",
          "Output to the specified file instead of stdout."},
+        {"-L, --line-numbers", "Show line numbers in output."},
     };
 
     size_t max_option_length = 0;
@@ -900,6 +912,8 @@ Config parse_arguments(int argc, char *argv[]) {
     } else if ((arg == "-o" || arg == "--output") &&
                i + 1 < argc) { // Output file option
       config.outputFile = argv[++i];
+    } else if (arg == "-L" || arg == "--line-numbers") {
+      config.showLineNumbers = true;
     } else {
       std::cerr << "Invalid option: " << arg << "\n";
       exit(1); // Exit on invalid options

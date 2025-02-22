@@ -64,6 +64,20 @@ std::string capture_stdout(const std::function<void()> &func) {
 
 // --- Test Functions ---
 
+void test_format_file_output_line_numbers() {
+  std::string content = "First line\nSecond line\nThird line";
+  std::string formatted_output = format_file_output(
+      "test_dir/line_numbers_file.cpp", false, false, "test_dir", content,
+      false, true); // showLineNumbers = true
+  std::string expected_output = "\n## File: line_numbers_file.cpp\n\n```cpp\n"
+                                "1 | First line\n"
+                                "2 | Second line\n"
+                                "3 | Third line\n"
+                                "\n```\n";
+  assert(formatted_output == expected_output);
+  std::cout << "Format file output with line numbers test passed\n";
+}
+
 void test_trim() {
   assert(trim("  hello  ") == "hello");
   assert(trim("\tworld\n") == "world");
@@ -223,14 +237,15 @@ void test_remove_cpp_comments() {
 
 void test_format_file_output() {
   std::string content = "File content lines\nSecond line.";
-  std::string formatted_output = format_file_output(
-      "test_dir/output_file.cpp", false, false, "test_dir", content, false);
+  std::string formatted_output =
+      format_file_output("test_dir/output_file.cpp", false, false, "test_dir",
+                         content, false, false);
   std::string expected_output = "\n## File: output_file.cpp\n\n```cpp\nFile "
                                 "content lines\nSecond line.\n\n```\n";
   assert(formatted_output == expected_output);
 
   formatted_output = format_file_output("test_dir/output_file.cpp", true, true,
-                                        "test_dir", content, true);
+                                        "test_dir", content, true, false);
   expected_output = "\n### File: output_file.cpp\n```cpp\nFile content "
                     "lines\nSecond line.\n\n```\n";
 
@@ -242,13 +257,15 @@ void test_format_file_output() {
 void test_process_single_file() {
   create_test_file("test_dir/process_test.cpp",
                    "// Test file\nint main() { return 1; }");
-  std::string output = process_single_file(
-      "test_dir/process_test.cpp", 0, false, false, false, "test_dir", false);
+  std::string output =
+      process_single_file("test_dir/process_test.cpp", 0, false, false, false,
+                          "test_dir", false, false);
   assert(output.find("Test file") != std::string::npos); // Content is included
   assert(output.find("```cpp") != std::string::npos); // Language tag included
 
-  std::string output_no_comments = process_single_file(
-      "test_dir/process_test.cpp", 0, true, false, false, "test_dir", false);
+  std::string output_no_comments =
+      process_single_file("test_dir/process_test.cpp", 0, true, false, false,
+                          "test_dir", false, false);
   assert(output_no_comments.find("Test file") ==
          std::string::npos); // Comment removed
 
@@ -345,7 +362,8 @@ void test_process_file_chunk_unordered() {
         config.unorderedOutput, config.removeComments, config.maxFileSizeB,
         config.disableMarkdownlintFixes, config.showFilenameOnly,
         config.dirPath, config.removeEmptyLines, results, processed_files,
-        total_bytes, console_mutex, ordered_results_mutex, should_stop, std::cout);
+        total_bytes, console_mutex, ordered_results_mutex, should_stop,
+        std::cout, false);
   });
 
   assert(processed_files == 2);
@@ -381,7 +399,8 @@ void test_process_file_chunk_ordered() {
         config.unorderedOutput, config.removeComments, config.maxFileSizeB,
         config.disableMarkdownlintFixes, config.showFilenameOnly,
         config.dirPath, config.removeEmptyLines, results, processed_files,
-        total_bytes, console_mutex, ordered_results_mutex, should_stop, std::cout);
+        total_bytes, console_mutex, ordered_results_mutex, should_stop,
+        std::cout, false);
   });
 
   assert(processed_files == 2);
@@ -398,20 +417,23 @@ void test_output_to_file() {
   config.outputFile = "test_output.txt"; // Set output file
   std::atomic<bool> should_stop{false};
 
-  std::string expected_content_part = "File: file1.cpp"; // Part of expected output
+  std::string expected_content_part =
+      "File: file1.cpp"; // Part of expected output
 
   capture_stdout([&]() { // Capture stdout to prevent polluting test output
     process_directory(config, should_stop);
   });
 
   std::ifstream outputFileStream("test_output.txt");
-  std::string output_file_content((std::istreambuf_iterator<char>(outputFileStream)),
-                                  std::istreambuf_iterator<char>());
+  std::string output_file_content(
+      (std::istreambuf_iterator<char>(outputFileStream)),
+      std::istreambuf_iterator<char>());
 
   assert(outputFileStream.is_open()); // Check if file was created
-  assert(output_file_content.find(expected_content_part) != std::string::npos); // Check content
+  assert(output_file_content.find(expected_content_part) !=
+         std::string::npos); // Check content
 
-  outputFileStream.close(); // Close the input file stream
+  outputFileStream.close();      // Close the input file stream
   fs::remove("test_output.txt"); // Cleanup output file
   std::cout << "Output to file test passed\n";
 }
@@ -438,6 +460,7 @@ int main() {
     test_process_file_chunk_unordered();
     test_process_file_chunk_ordered();
     test_output_to_file();
+    test_format_file_output_line_numbers(); // Added line numbers test
 
     cleanup_test_directory();
     std::cout << "\nAll tests passed successfully!\n";
