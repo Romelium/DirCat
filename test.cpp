@@ -217,13 +217,10 @@ void test_should_ignore_folder() {
       should_ignore_folder("test_dir/.hidden_dir", base_config.disableGitignore,
                            base_config.dirPath, base_config.ignoreDotFolders,
                            base_config.ignoredFolders) == true); // Dot folder
-  // assert(should_ignore_folder("test_dir/ignored_folder",
-  //                             base_config.disableGitignore,
-  //
-  //                             base_config.dirPath,
-  //                             base_config.ignoreDotFolders,
-  //                             base_config.ignoredFolders) == true); //
-  //                             Gitignore
+  assert(should_ignore_folder("test_dir/ignored_folder",
+                              base_config.disableGitignore, base_config.dirPath,
+                              base_config.ignoreDotFolders,
+                              base_config.ignoredFolders) == true); // Gitignore
   assert(should_ignore_folder(
              "test_dir/not_ignored_folder", base_config.disableGitignore,
              base_config.dirPath, base_config.ignoreDotFolders,
@@ -506,8 +503,8 @@ int main() {
     test_process_file_chunk_unordered();
     test_process_file_chunk_ordered();
     test_output_to_file();
-    test_format_file_output_line_numbers();          // Added line numbers test
-    test_is_path_ignored_by_gitignore_multi_level(); // Multi gitignore test
+    test_format_file_output_line_numbers();
+    test_is_path_ignored_by_gitignore_multi_level();
 
     cleanup_test_directory();
     std::cout << "\nAll tests passed successfully!\n";

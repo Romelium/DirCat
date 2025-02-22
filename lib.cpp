@@ -90,8 +90,10 @@ bool matches_gitignore_rule(const fs::path &path, const std::string &rule) {
     rule_str.erase(0, 1);
   }
 
-  if (rule_str.back() == '/') {             // Directory rule (prefix match)
-    if (path_str.rfind(rule_str, 0) == 0) { // Just check prefix
+  if (rule_str.back() == '/') { // Directory rule (prefix match)
+    std::string rule_prefix = rule_str.substr(
+        0, rule_str.length() - 1); // Remove trailing slash for comparison
+    if (path_str.rfind(rule_prefix, 0) == 0) { // Check prefix without slash
       return true; // Directory rule matches if path starts with rule prefix
     }
   } else if (rule_str.find('*') != std::string::npos) { // Wildcard matching
