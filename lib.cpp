@@ -39,6 +39,7 @@ struct Config {
   bool onlyLast = false;
   fs::path outputFile;
   bool showLineNumbers = false;
+  bool dryRun = false; // ADDED: Dry run mode
 };
 
 // --- Utility Functions ---
@@ -50,6 +51,12 @@ std::string trim(std::string_view str) {
     return "";
   size_t end = str.find_last_not_of(whitespace);
   return std::string(str.substr(start, end - start + 1));
+}
+
+std::string normalize_path(const fs::path &path) {
+  std::string path_str = path.string();
+  std::replace(path_str.begin(), path_str.end(), '\\', '/');
+  return path_str;
 }
 
 std::vector<std::string> load_gitignore_rules(const fs::path &gitignore_path) {
@@ -326,10 +333,18 @@ std::string process_single_file(const fs::path &path,
                                 bool removeComments,
                                 bool disableMarkdownlintFixes,
                                 bool showFilenameOnly, const fs::path &dirPath,
-                                bool removeEmptyLines, bool showLineNumbers) {
+                                bool removeEmptyLines, bool showLineNumbers,
+                                bool dryRun) { // ADDED: dryRun
   std::ifstream file(path, std::ios::binary);
   if (!file || !is_file_size_valid(path, maxFileSizeB))
     return "";
+
+  if (dryRun) { // In dry-run mode, skip file content reading and processing
+    return format_file_output(
+        path, disableMarkdownlintFixes, showFilenameOnly, dirPath, "",
+        removeEmptyLines,
+        showLineNumbers); // Return formatted header even if content is empty
+  }
 
   std::string fileContent((std::istreambuf_iterator<char>(file)),
                           std::istreambuf_iterator<char>());
@@ -494,14 +509,16 @@ void process_file_chunk(std::span<const fs::path> chunk, bool unorderedOutput,
                         std::mutex &console_mutex,
                         std::mutex &ordered_results_mutex,
                         std::atomic<bool> &should_stop,
-                        std::ostream &output_stream, bool showLineNumbers) {
+                        std::ostream &output_stream, bool showLineNumbers,
+                        bool dryRun) { // ADDED: dryRun
   for (const auto &path : chunk) {
     if (should_stop)
       break;
     try {
       std::string file_content = process_single_file(
           path, maxFileSizeB, removeComments, disableMarkdownlintFixes,
-          showFilenameOnly, dirPath, removeEmptyLines, showLineNumbers);
+          showFilenameOnly, dirPath, removeEmptyLines, showLineNumbers,
+          dryRun); // ADDED: dryRun
       if (!file_content.empty()) {
         total_bytes += fs::file_size(path);
 
@@ -509,8 +526,14 @@ void process_file_chunk(std::span<const fs::path> chunk, bool unorderedOutput,
           std::lock_guard<std::mutex> lock(ordered_results_mutex);
           results.emplace_back(path, file_content);
         } else {
-          std::lock_guard<std::mutex> lock(console_mutex);
-          output_stream << file_content;
+          if (!dryRun) { // Only output content if not dry run
+            std::lock_guard<std::mutex> lock(console_mutex);
+            output_stream << file_content;
+          } else {
+            std::lock_guard<std::mutex> lock(console_mutex);
+            output_stream << normalize_path(path) // Normalized path for dry-run
+                          << "\n";
+          }
         }
       }
       ++processed_files;
@@ -523,8 +546,8 @@ void process_file_chunk(std::span<const fs::path> chunk, bool unorderedOutput,
 
 void process_last_files(const std::vector<fs::path> &last_files_list,
                         const Config &config, std::atomic<bool> &should_stop,
-                        std::mutex &console_mutex,
-                        std::ostream &output_stream) {
+                        std::mutex &console_mutex, std::ostream &output_stream,
+                        bool dryRun) { // ADDED: dryRun
   auto get_sort_position = [&](const fs::path &relPath) -> int {
     auto exactIt =
         std::find(config.lastFiles.begin(), config.lastFiles.end(), relPath);
@@ -562,10 +585,17 @@ void process_last_files(const std::vector<fs::path> &last_files_list,
     std::string file_content = process_single_file(
         file, config.maxFileSizeB, config.removeComments,
         config.disableMarkdownlintFixes, config.showFilenameOnly,
-        config.dirPath, config.removeEmptyLines, config.showLineNumbers);
+        config.dirPath, config.removeEmptyLines, config.showLineNumbers,
+        dryRun); // ADDED: dryRun
     if (!file_content.empty()) {
-      std::lock_guard<std::mutex> lock(console_mutex);
-      output_stream << file_content;
+      if (!dryRun) { // Only output content if not dry run
+        std::lock_guard<std::mutex> lock(console_mutex);
+        output_stream << file_content;
+      } else {
+        std::lock_guard<std::mutex> lock(console_mutex);
+        output_stream << normalize_path(file)
+                      << "\n"; // Normalized path for dry-run
+      }
     }
   }
 }
@@ -578,9 +608,16 @@ bool process_file(const fs::path &path, const Config &config,
     std::string file_content = process_single_file(
         path, config.maxFileSizeB, config.removeComments,
         config.disableMarkdownlintFixes, true, config.dirPath,
-        config.removeEmptyLines, config.showLineNumbers);
-    if (!file_content.empty()) {
+        config.removeEmptyLines, config.showLineNumbers,
+        config.dryRun); // ADDED: dryRun
+    if (!config.dryRun &&
+        !file_content.empty()) { // Only output content if not dry run
       output_stream << file_content;
+    } else if (config.dryRun &&
+               !file_content.empty()) { // if dryRun and file should be
+                                        // processed, print file path
+      output_stream << normalize_path(path)
+                    << "\n"; // Normalized path for dry-run
     }
   } catch (const std::exception &e) {
     std::cerr << "ERROR: Processing Single File: " << e.what() << '\n';
@@ -609,6 +646,17 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
   }
 
   auto [normalFiles, lastFilesList] = collect_files(config, should_stop);
+
+  if (config.dryRun) { // Dry run mode: print file paths and exit
+    std::cout << "Files to be processed:\n";
+    for (const auto &file : normalFiles) {
+      std::cout << normalize_path(file) << "\n"; // Normalized path for dry-run
+    }
+    for (const auto &file : lastFilesList) {
+      std::cout << normalize_path(file) << "\n"; // Normalized path for dry-run
+    }
+    return true;
+  }
 
   if (normalFiles.empty() && lastFilesList.empty()) {
     if (!config.onlyLast) {
@@ -664,7 +712,8 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
             config.disableMarkdownlintFixes, config.showFilenameOnly,
             config.dirPath, config.removeEmptyLines, orderedResults,
             processedFiles, totalBytes, consoleMutex, orderedResultsMutex,
-            should_stop, output_stream, config.showLineNumbers);
+            should_stop, output_stream, config.showLineNumbers,
+            config.dryRun); // ADDED: dryRun
       } catch (const std::exception &e) {
         std::cerr << "ERROR: Exception in thread: " << e.what() << '\n';
       }
@@ -689,7 +738,7 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
   }
 
   process_last_files(lastFilesList, config, should_stop, consoleMutex,
-                     output_stream);
+                     output_stream, config.dryRun); // ADDED: dryRun
 
   if (outputFileStream.is_open()) {
     outputFileStream.close();
@@ -746,6 +795,8 @@ Config parse_arguments(int argc, char *argv[]) {
         {"-o, --output <file>",
          "Output to the specified file instead of stdout."},
         {"-L, --line-numbers", "Show line numbers in output."},
+        {"-D, --dry-run", "Dry-run: list files to be processed without "
+                          "concatenating them."}, // ADDED: Dry run option
     };
 
     size_t max_option_length = 0;
@@ -866,6 +917,8 @@ Config parse_arguments(int argc, char *argv[]) {
       config.outputFile = argv[++i];
     } else if (arg == "-L" || arg == "--line-numbers") {
       config.showLineNumbers = true;
+    } else if (arg == "-D" || arg == "--dry-run") { // ADDED: Dry run option
+      config.dryRun = true;
     } else {
       std::cerr << "Invalid option: " << arg << "\n";
       exit(1);

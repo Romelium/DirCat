@@ -287,13 +287,13 @@ void test_process_single_file() {
                    "// Test file\nint main() { return 1; }");
   std::string output =
       process_single_file("test_dir/process_test.cpp", 0, false, false, false,
-                          "test_dir", false, false);
+                          "test_dir", false, false, false);
   assert(output.find("Test file") != std::string::npos);
   assert(output.find("```cpp") != std::string::npos);
 
   std::string output_no_comments =
       process_single_file("test_dir/process_test.cpp", 0, true, false, false,
-                          "test_dir", false, false);
+                          "test_dir", false, false, false);
   assert(output_no_comments.find("Test file") == std::string::npos);
 
   fs::remove("test_dir/process_test.cpp");
@@ -383,7 +383,7 @@ void test_process_file_chunk_unordered() {
         config.disableMarkdownlintFixes, config.showFilenameOnly,
         config.dirPath, config.removeEmptyLines, results, processed_files,
         total_bytes, console_mutex, ordered_results_mutex, should_stop,
-        std::cout, false);
+        std::cout, false, false);
   });
 
   assert(processed_files == 2);
@@ -417,7 +417,7 @@ void test_process_file_chunk_ordered() {
         config.disableMarkdownlintFixes, config.showFilenameOnly,
         config.dirPath, config.removeEmptyLines, results, processed_files,
         total_bytes, console_mutex, ordered_results_mutex, should_stop,
-        std::cout, false);
+        std::cout, false, false);
   });
 
   assert(processed_files == 2);
@@ -451,6 +451,36 @@ void test_output_to_file() {
   std::cout << "Output to file test passed\n";
 }
 
+void test_dry_run_mode() {
+  Config config;
+  config.dirPath = "test_dir";
+  config.dryRun = true;
+  std::atomic<bool> should_stop{false};
+
+  std::string output =
+      capture_stdout([&]() { process_directory(config, should_stop); });
+
+  assert(output.find("Files to be processed:") != std::string::npos);
+  assert(output.find("test_dir/file1.cpp") != std::string::npos);
+  assert(output.find("test_dir/FILE3.HPP") != std::string::npos);
+  assert(output.find("test_dir/file5") ==
+         std::string::npos); // files with no extentions are currently ignored
+  assert(output.find("test_dir/subdir1/file6.cpp") != std::string::npos);
+  assert(output.find("test_dir/not_ignored_folder/file8.cpp") !=
+         std::string::npos);
+  assert(output.find("test_dir/file2.txt") == std::string::npos); // gitignore
+  assert(output.find("test_dir/.hidden_file.cpp") !=
+         std::string::npos); // .hidden_file.cpp is not a dot folder
+  assert(output.find("test_dir/ignored_folder/file7.cpp") ==
+         std::string::npos); // ignored folder and gitignore
+  assert(output.find("test_dir/file4.excluded") !=
+         std::string::npos); // .excluded is not excluded
+  assert(output.find("## File:") ==
+         std::string::npos); // No file content formatting
+
+  std::cout << "Dry run mode test passed\n";
+}
+
 int main() {
   try {
     cleanup_test_directory();
@@ -475,6 +505,7 @@ int main() {
     test_output_to_file();
     test_format_file_output_line_numbers();
     test_is_path_ignored_by_gitignore_multi_level();
+    test_dry_run_mode();
 
     cleanup_test_directory();
     std::cout << "\nAll tests passed successfully!\n";
