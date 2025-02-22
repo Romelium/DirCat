@@ -36,7 +36,6 @@ struct Config {
   bool disableMarkdownlintFixes = false;
   bool disableGitignore = false;
   fs::path gitignorePath;
-  std::vector<std::string> gitignoreRules;
   bool onlyLast = false;
   fs::path outputFile;
   bool showLineNumbers = false; // Add this line
@@ -117,11 +116,8 @@ bool matches_gitignore_rule(const fs::path &path, const std::string &rule) {
   return false; // No match for this rule
 }
 
-bool is_path_ignored_by_gitignore(
-    const fs::path &path,
-    const std::vector<std::string>
-        & /*gitignore_rules - not used directly anymore*/,
-    const fs::path &base_path) {
+bool is_path_ignored_by_gitignore(const fs::path &path,
+                                  const fs::path &base_path) {
   std::vector<std::string> accumulated_rules;
   fs::path current_path = path;
   fs::path current_base = base_path;
@@ -200,16 +196,11 @@ bool is_file_extension_allowed(
 }
 
 // Checks if a folder should be ignored.
-bool should_ignore_folder(
-    const fs::path &path, bool disableGitignore,
-    const std::vector<std::string>
-        &gitignoreRules, // gitignoreRules not directly used, but kept for
-                         // config passing
-    const fs::path &dirPath, bool ignoreDotFolders,
-    const std::vector<fs::path> &ignoredFolders) {
-  if (!disableGitignore &&
-      is_path_ignored_by_gitignore(path, {},
-                                   dirPath)) { // Pass empty rules and dirPath
+bool should_ignore_folder(const fs::path &path, bool disableGitignore,
+                          const fs::path &dirPath, bool ignoreDotFolders,
+                          const std::vector<fs::path> &ignoredFolders) {
+  if (!disableGitignore && is_path_ignored_by_gitignore(
+                               path, dirPath)) { // Pass empty rules and dirPath
     return true;
   }
   if (ignoreDotFolders && path.filename().string().front() == '.') {
@@ -236,15 +227,11 @@ bool should_ignore_folder(
 
 // Checks if a file should be ignored.
 bool should_ignore_file(const fs::path &path, bool disableGitignore,
-                        const std::vector<std::string> &
-                            gitignoreRules, // gitignoreRules not directly used,
-                                            // but kept for config passing
                         const fs::path &dirPath,
                         unsigned long long maxFileSizeB,
                         const std::vector<fs::path> &ignoredFiles) {
-  if (!disableGitignore &&
-      is_path_ignored_by_gitignore(path, {},
-                                   dirPath)) // Pass empty rules and dirPath
+  if (!disableGitignore && is_path_ignored_by_gitignore(
+                               path, dirPath)) // Pass empty rules and dirPath
     return true;
 
   if (!is_file_size_valid(path, maxFileSizeB))
@@ -419,7 +406,7 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
   auto shouldSkipDirectory = [&](const fs::path &dirPath) {
     return fs::is_directory(dirPath) &&
            should_ignore_folder(
-               dirPath, config.disableGitignore, config.gitignoreRules,
+               dirPath, config.disableGitignore,
                config.dirPath, // gitignoreRules not directly used
                config.ignoreDotFolders, config.ignoredFolders);
   };
@@ -454,8 +441,8 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
               is_file_extension_allowed(it->path(), config.fileExtensions,
                                         config.excludedFileExtensions) &&
               !should_ignore_file(it->path(), config.disableGitignore,
-                                  config.gitignoreRules, config.dirPath,
-                                  config.maxFileSizeB, config.ignoredFiles) &&
+                                  config.dirPath, config.maxFileSizeB,
+                                  config.ignoredFiles) &&
               !matches_regex_filters(it->path(), config.regexFilters)) {
             if (lastFilesSet.insert(it->path()).second) {
               lastFilesList.push_back(it->path());
@@ -490,7 +477,7 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
             is_file_extension_allowed(it->path(), config.fileExtensions,
                                       config.excludedFileExtensions) &&
             !should_ignore_file(
-                it->path(), config.disableGitignore, config.gitignoreRules,
+                it->path(), config.disableGitignore,
                 config.dirPath, // gitignoreRules not directly used
                 config.maxFileSizeB, config.ignoredFiles) &&
             !matches_regex_filters(it->path(), config.regexFilters)) {
@@ -516,7 +503,7 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
             is_file_extension_allowed(it->path(), config.fileExtensions,
                                       config.excludedFileExtensions) &&
             !should_ignore_file(
-                it->path(), config.disableGitignore, config.gitignoreRules,
+                it->path(), config.disableGitignore,
                 config.dirPath, // gitignoreRules not directly used
                 config.maxFileSizeB, config.ignoredFiles) &&
             !matches_regex_filters(it->path(), config.regexFilters)) {
@@ -667,9 +654,7 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
     if (config.gitignorePath.empty()) {
       config.gitignorePath = config.dirPath / ".gitignore";
     }
-    config.gitignoreRules = load_gitignore_rules(config.gitignorePath);
-    if (!config.disableGitignore && config.gitignoreRules.empty() &&
-        !fs::exists(config.gitignorePath)) {
+    if (!config.disableGitignore && !fs::exists(config.gitignorePath)) {
       std::cerr
           << "WARNING: Gitignore option used but no gitignore file found at: "
           << config.gitignorePath << ". Ignoring gitignore.\n";
