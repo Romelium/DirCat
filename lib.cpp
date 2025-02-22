@@ -38,7 +38,7 @@ struct Config {
   bool onlyLast = false;
   fs::path outputFile;
   bool showLineNumbers = false;
-  bool dryRun = false; // ADDED: Dry run mode
+  bool dryRun = false;
 };
 
 // --- Utility Functions ---
@@ -62,7 +62,8 @@ std::vector<std::string> load_gitignore_rules(const fs::path &gitignore_path) {
   std::vector<std::string> rules;
   std::ifstream file(gitignore_path);
   if (!file.is_open()) {
-    std::cerr << "ERROR: Could not open gitignore file: " << normalize_path(gitignore_path) << '\n'; // Granular error reporting: path
+    std::cerr << "ERROR: Could not open gitignore file: "
+              << normalize_path(gitignore_path) << '\n';
     return rules;
   }
   std::string line;
@@ -142,7 +143,7 @@ bool is_path_ignored_by_gitignore(const fs::path &path,
     relative_path = fs::relative(path, base_path);
   } catch (const std::exception &e) {
     std::cerr << "ERROR: Error getting relative path for gitignore check: "
-              << normalize_path(path) << ": " << e.what() << '\n'; // Granular error reporting: path
+              << normalize_path(path) << ": " << e.what() << '\n';
     return false;
   }
 
@@ -163,7 +164,8 @@ bool is_file_size_valid(const fs::path &path,
   try {
     return max_file_size_b == 0 || fs::file_size(path) <= max_file_size_b;
   } catch (const fs::filesystem_error &e) {
-    std::cerr << "ERROR: Could not get file size for: " << normalize_path(path) << ": " << e.what() << '\n'; // Granular error reporting: path
+    std::cerr << "ERROR: Could not get file size for: " << normalize_path(path)
+              << ": " << e.what() << '\n';
     return false;
   }
 }
@@ -200,8 +202,8 @@ bool should_ignore_folder(const fs::path &path, bool disableGitignore,
   try {
     relativePath = fs::relative(path, dirPath);
   } catch (const std::exception &e) {
-    std::cerr << "ERROR: Error getting relative path for " << normalize_path(path) // Granular error reporting: path
-              << ": " << e.what() << '\n';
+    std::cerr << "ERROR: Error getting relative path for "
+              << normalize_path(path) << ": " << e.what() << '\n';
     return false;
   }
 
@@ -237,7 +239,7 @@ bool matches_regex_filters(const fs::path &path,
       if (std::regex_search(filename, std::regex(regexStr)))
         return true;
     } catch (const std::regex_error &e) {
-      std::cerr << "ERROR: Invalid regex: " << regexStr << ": " << e.what() // Already has regex string
+      std::cerr << "ERROR: Invalid regex: " << regexStr << ": " << e.what()
                 << '\n';
     }
   }
@@ -330,26 +332,22 @@ std::string format_file_output(const fs::path &path,
   return content.str();
 }
 
-std::string process_single_file(const fs::path &path,
-                                unsigned long long maxFileSizeB,
-                                bool removeComments,
-                                bool disableMarkdownlintFixes,
-                                bool showFilenameOnly, const fs::path &dirPath,
-                                bool removeEmptyLines, bool showLineNumbers,
-                                bool dryRun) { // ADDED: dryRun
+std::string
+process_single_file(const fs::path &path, unsigned long long maxFileSizeB,
+                    bool removeComments, bool disableMarkdownlintFixes,
+                    bool showFilenameOnly, const fs::path &dirPath,
+                    bool removeEmptyLines, bool showLineNumbers, bool dryRun) {
   std::ifstream file(path, std::ios::binary);
   if (!file) {
-    std::cerr << "ERROR: Could not open file: " << normalize_path(path) << '\n'; // Granular error reporting: path
+    std::cerr << "ERROR: Could not open file: " << normalize_path(path) << '\n';
     return "";
   }
   if (!is_file_size_valid(path, maxFileSizeB))
     return "";
 
-  if (dryRun) { // In dry-run mode, skip file content reading and processing
-    return format_file_output(
-        path, disableMarkdownlintFixes, showFilenameOnly, dirPath, "",
-        removeEmptyLines,
-        showLineNumbers); // Return formatted header even if content is empty
+  if (dryRun) {
+    return format_file_output(path, disableMarkdownlintFixes, showFilenameOnly,
+                              dirPath, "", removeEmptyLines, showLineNumbers);
   }
 
   std::string fileContent((std::istreambuf_iterator<char>(file)),
@@ -410,8 +408,9 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
           lastFilesList.push_back(absPath);
         }
       } else {
-        std::cerr << "ERROR: --only-last specified file not found or not a file: " // Granular error reporting: file type
-                  << normalize_path(absPath) << '\n'; // Granular error reporting: path
+        std::cerr
+            << "ERROR: --only-last specified file not found or not a file: "
+            << normalize_path(absPath) << '\n';
         exit(1);
       }
     }
@@ -435,8 +434,9 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
           }
         }
       } else {
-        std::cerr << "ERROR: --only-last specified directory not found or not a directory: " // Granular error reporting: file type
-                  << normalize_path(absDirPath) << '\n'; // Granular error reporting: path
+        std::cerr << "ERROR: --only-last specified directory not found or not "
+                     "a directory: "
+                  << normalize_path(absDirPath) << '\n';
         exit(1);
       }
     }
@@ -495,7 +495,8 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
     }
 
   } catch (const fs::filesystem_error &e) {
-    std::cerr << "ERROR: Error scanning directory: " << config.dirPath.string() << ": " << e.what() << '\n'; // Already has dir path
+    std::cerr << "ERROR: Error scanning directory: " << config.dirPath.string()
+              << ": " << e.what() << '\n';
     return {normalFiles, lastFilesList};
   }
 
@@ -505,26 +506,22 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
 
 // --- File Processing ---
 
-void process_file_chunk(std::span<const fs::path> chunk, bool unorderedOutput,
-                        bool removeComments, unsigned long long maxFileSizeB,
-                        bool disableMarkdownlintFixes, bool showFilenameOnly,
-                        const fs::path &dirPath, bool removeEmptyLines,
-                        std::vector<std::pair<fs::path, std::string>> &results,
-                        std::atomic<size_t> &processed_files,
-                        std::atomic<size_t> &total_bytes,
-                        std::mutex &console_mutex,
-                        std::mutex &ordered_results_mutex,
-                        std::atomic<bool> &should_stop,
-                        std::ostream &output_stream, bool showLineNumbers,
-                        bool dryRun) { // ADDED: dryRun
+void process_file_chunk(
+    std::span<const fs::path> chunk, bool unorderedOutput, bool removeComments,
+    unsigned long long maxFileSizeB, bool disableMarkdownlintFixes,
+    bool showFilenameOnly, const fs::path &dirPath, bool removeEmptyLines,
+    std::vector<std::pair<fs::path, std::string>> &results,
+    std::atomic<size_t> &processed_files, std::atomic<size_t> &total_bytes,
+    std::mutex &console_mutex, std::mutex &ordered_results_mutex,
+    std::atomic<bool> &should_stop, std::ostream &output_stream,
+    bool showLineNumbers, bool dryRun) {
   for (const auto &path : chunk) {
     if (should_stop)
       break;
     try {
       std::string file_content = process_single_file(
           path, maxFileSizeB, removeComments, disableMarkdownlintFixes,
-          showFilenameOnly, dirPath, removeEmptyLines, showLineNumbers,
-          dryRun); // ADDED: dryRun
+          showFilenameOnly, dirPath, removeEmptyLines, showLineNumbers, dryRun);
       if (!file_content.empty()) {
         total_bytes += fs::file_size(path);
 
@@ -532,19 +529,18 @@ void process_file_chunk(std::span<const fs::path> chunk, bool unorderedOutput,
           std::lock_guard<std::mutex> lock(ordered_results_mutex);
           results.emplace_back(path, file_content);
         } else {
-          if (!dryRun) { // Only output content if not dry run
+          if (!dryRun) {
             std::lock_guard<std::mutex> lock(console_mutex);
             output_stream << file_content;
           } else {
             std::lock_guard<std::mutex> lock(console_mutex);
-            output_stream << normalize_path(path) // Normalized path for dry-run
-                          << "\n";
+            output_stream << normalize_path(path) << "\n";
           }
         }
       }
       ++processed_files;
     } catch (const std::exception &e) {
-      std::cerr << "ERROR: Error processing " << normalize_path(path) << ": " // Granular error reporting: path
+      std::cerr << "ERROR: Error processing " << normalize_path(path) << ": "
                 << e.what() << '\n';
     }
   }
@@ -553,7 +549,7 @@ void process_file_chunk(std::span<const fs::path> chunk, bool unorderedOutput,
 void process_last_files(const std::vector<fs::path> &last_files_list,
                         const Config &config, std::atomic<bool> &should_stop,
                         std::mutex &console_mutex, std::ostream &output_stream,
-                        bool dryRun) { // ADDED: dryRun
+                        bool dryRun) {
   auto get_sort_position = [&](const fs::path &relPath) -> int {
     auto exactIt =
         std::find(config.lastFiles.begin(), config.lastFiles.end(), relPath);
@@ -592,15 +588,14 @@ void process_last_files(const std::vector<fs::path> &last_files_list,
         file, config.maxFileSizeB, config.removeComments,
         config.disableMarkdownlintFixes, config.showFilenameOnly,
         config.dirPath, config.removeEmptyLines, config.showLineNumbers,
-        dryRun); // ADDED: dryRun
+        dryRun);
     if (!file_content.empty()) {
-      if (!dryRun) { // Only output content if not dry run
+      if (!dryRun) {
         std::lock_guard<std::mutex> lock(console_mutex);
         output_stream << file_content;
       } else {
         std::lock_guard<std::mutex> lock(console_mutex);
-        output_stream << normalize_path(file)
-                      << "\n"; // Normalized path for dry-run
+        output_stream << normalize_path(file) << "\n";
       }
     }
   }
@@ -614,19 +609,15 @@ bool process_file(const fs::path &path, const Config &config,
     std::string file_content = process_single_file(
         path, config.maxFileSizeB, config.removeComments,
         config.disableMarkdownlintFixes, true, config.dirPath,
-        config.removeEmptyLines, config.showLineNumbers,
-        config.dryRun); // ADDED: dryRun
-    if (!config.dryRun &&
-        !file_content.empty()) { // Only output content if not dry run
+        config.removeEmptyLines, config.showLineNumbers, config.dryRun);
+    if (!config.dryRun && !file_content.empty()) {
       output_stream << file_content;
-    } else if (config.dryRun &&
-               !file_content.empty()) { // if dryRun and file should be
-                                        // processed, print file path
-      output_stream << normalize_path(path)
-                    << "\n"; // Normalized path for dry-run
+    } else if (config.dryRun && !file_content.empty()) {
+      output_stream << normalize_path(path) << "\n";
     }
   } catch (const std::exception &e) {
-    std::cerr << "ERROR: Processing Single File: " << normalize_path(path) << ": " << e.what() << '\n'; // Granular error reporting: path
+    std::cerr << "ERROR: Processing Single File: " << normalize_path(path)
+              << ": " << e.what() << '\n';
     return false;
   }
   return true;
@@ -634,27 +625,27 @@ bool process_file(const fs::path &path, const Config &config,
 
 bool process_directory(Config config, std::atomic<bool> &should_stop) {
   if (!fs::exists(config.dirPath) || !fs::is_directory(config.dirPath)) {
-    std::cerr << "ERROR: Invalid directory path: " << config.dirPath.string() // Already has dir path
+    std::cerr << "ERROR: Invalid directory path: " << config.dirPath.string()
               << '\n';
     return false;
   }
 
   auto [normalFiles, lastFilesList] = collect_files(config, should_stop);
 
-  if (config.dryRun) { // Dry run mode: print file paths and exit
+  if (config.dryRun) {
     std::cout << "Files to be processed:\n";
     for (const auto &file : normalFiles) {
-      std::cout << normalize_path(file) << "\n"; // Normalized path for dry-run
+      std::cout << normalize_path(file) << "\n";
     }
     for (const auto &file : lastFilesList) {
-      std::cout << normalize_path(file) << "\n"; // Normalized path for dry-run
+      std::cout << normalize_path(file) << "\n";
     }
     return true;
   }
 
   if (normalFiles.empty() && lastFilesList.empty()) {
     if (!config.onlyLast) {
-      std::cout << "No matching files found in: " << config.dirPath.string() // Already has dir path
+      std::cout << "No matching files found in: " << config.dirPath.string()
                 << "\n";
     }
     return true;
@@ -670,8 +661,8 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
   if (!config.outputFile.empty()) {
     outputFileStream.open(config.outputFile);
     if (!outputFileStream.is_open()) {
-      std::cerr << "ERROR: Could not open output file: " << normalize_path(config.outputFile) // Granular error reporting: path
-                << '\n';
+      std::cerr << "ERROR: Could not open output file: "
+                << normalize_path(config.outputFile) << '\n';
       return false;
     }
     outputPtr = &outputFileStream;
@@ -706,10 +697,9 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
             config.disableMarkdownlintFixes, config.showFilenameOnly,
             config.dirPath, config.removeEmptyLines, orderedResults,
             processedFiles, totalBytes, consoleMutex, orderedResultsMutex,
-            should_stop, output_stream, config.showLineNumbers,
-            config.dryRun); // ADDED: dryRun
+            should_stop, output_stream, config.showLineNumbers, config.dryRun);
       } catch (const std::exception &e) {
-        std::cerr << "ERROR: Exception in thread: " << e.what() << '\n'; // Generic thread error, no path context
+        std::cerr << "ERROR: Exception in thread: " << e.what() << '\n';
       }
     });
   }
@@ -732,7 +722,7 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
   }
 
   process_last_files(lastFilesList, config, should_stop, consoleMutex,
-                     output_stream, config.dryRun); // ADDED: dryRun
+                     output_stream, config.dryRun);
 
   if (outputFileStream.is_open()) {
     outputFileStream.close();
@@ -789,7 +779,7 @@ Config parse_arguments(int argc, char *argv[]) {
          "Output to the specified file instead of stdout."},
         {"-L, --line-numbers", "Show line numbers in output."},
         {"-D, --dry-run", "Dry-run: list files to be processed without "
-                          "concatenating them."}, // ADDED: Dry run option
+                          "concatenating them."},
     };
 
     size_t max_option_length = 0;
@@ -849,8 +839,9 @@ Config parse_arguments(int argc, char *argv[]) {
                 fs::relative(absoluteEntry, config.dirPath);
             config.ignoredFolders.emplace_back(relativeEntry);
           } catch (const std::exception &e) {
-            std::cerr << "ERROR: Invalid ignore path: " << normalize_path(absoluteEntry) // Granular error reporting: path
-                      << " is not under " << config.dirPath << '\n';
+            std::cerr << "ERROR: Invalid ignore path: "
+                      << normalize_path(absoluteEntry) << " is not under "
+                      << config.dirPath << '\n';
             exit(1);
           }
         } else {
@@ -876,8 +867,9 @@ Config parse_arguments(int argc, char *argv[]) {
         try {
           relativeEntry = fs::relative(absoluteEntry, config.dirPath);
         } catch (const std::exception &e) {
-          std::cerr << "ERROR: Invalid last path: " << normalize_path(absoluteEntry) // Granular error reporting: path
-                    << " is not under " << config.dirPath << '\n';
+          std::cerr << "ERROR: Invalid last path: "
+                    << normalize_path(absoluteEntry) << " is not under "
+                    << config.dirPath << '\n';
           exit(1);
         }
 
@@ -897,7 +889,7 @@ Config parse_arguments(int argc, char *argv[]) {
       config.outputFile = argv[++i];
     } else if (arg == "-L" || arg == "--line-numbers") {
       config.showLineNumbers = true;
-    } else if (arg == "-D" || arg == "--dry-run") { // ADDED: Dry run option
+    } else if (arg == "-D" || arg == "--dry-run") {
       config.dryRun = true;
     } else {
       std::cerr << "Invalid option: " << arg << "\n";
