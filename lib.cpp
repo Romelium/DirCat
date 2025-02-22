@@ -118,6 +118,12 @@ bool matches_gitignore_rule(const fs::path &path, const std::string &rule) {
 
 bool is_path_ignored_by_gitignore(const fs::path &path,
                                   const fs::path &base_path) {
+  for (const auto &component : path) {
+    if (component == ".git") {
+      return true;
+    }
+  }
+
   std::vector<std::string> accumulated_rules;
   fs::path current_path = path.parent_path();
   fs::path current_base = base_path;
