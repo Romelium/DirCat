@@ -1,6 +1,6 @@
 # DirCat
 
-DirCat is a high-performance C++ utility that concatenates and displays the contents of files in a directory, similar to the Unix `cat` command but for entire directories. It supports multi-threaded processing, recursive directory traversal, file filtering, and various output formatting options.
+DirCat is a high-performance C++ utility that concatenates and displays the contents of files within a directory, functioning as a directory-aware version of the Unix `cat` command. Engineered for efficiency and flexibility, DirCat leverages multi-threading, recursive directory traversal, and comprehensive file filtering options to streamline content aggregation from directories. It's ideal for developers, writers, and anyone needing to combine multiple text-based files into a single output.
 
 ## Usage
 
@@ -10,24 +10,24 @@ DirCat is a high-performance C++ utility that concatenates and displays the cont
 
 ### Options
 
-- `-m, --max-size <bytes>`: Maximum file size in bytes. Files larger than this size will be ignored. Default: no limit.
-- `-n, --no-recursive`: Disable recursive directory search. Only process files in the top-level directory.
-- `-e, --ext <ext>`: Process only files with the specified extension. Can be used multiple times to include multiple extensions, grouped together (e.g., `-e cpp h`).
-- `-x, --exclude-ext <ext>`: Exclude files with the specified extension. Can be used multiple times to exclude multiple extensions, grouped together (e.g., `-x tmp log`).
-- `-d, --dot-folders`: Include folders starting with a dot (e.g., `.git`, `.vscode`), which are ignored by default.
-- `-i, --ignore <item>`: Ignore specific folders or files. Paths are relative to the input directory. Can be used multiple times to ignore multiple items, grouped together (e.g., `-i build temp.txt`). For directories, all files and subdirectories within the ignored directory will be skipped.
-- `-r, --regex <pattern>`: Exclude files where the filename matches the given regex pattern.  Regex is applied to the filename only, not the full path. Can be used multiple times to specify multiple regex patterns, grouped together (e.g., `-r "\.tmp$" "backup"`).
-- `-c, --remove-comments`: Remove C++ style comments (`//` and `/* ... */`) from the output code. Applicable to code files.
-- `-l, --remove-empty-lines`: Remove empty lines from the output.
-- `-f, --filename-only`: Show only the filename in file headers. By default, the relative path from the input directory is shown.
-- `-u, --unordered`: Output files as they are processed. This can be faster, especially for large directories, but the order of files in the output is not guaranteed (except for files specified with `-z`). This is the default behavior if `-z` or `-Z` are not used.
-- `-z, --last <item>`: Process specified file or directory last. The order of multiple `-z` options is strictly preserved. When a directory is specified, all files within it (and its subdirectories if recursion is enabled) will be processed after other files, maintaining the relative order specified by multiple `-z` arguments. You can specify a directory path, an exact filename (relative path), or just the filename itself. Paths are relative to the input directory.
-- `-Z, --only-last`: **Exclusive mode:** Only process the files and directories specified by the `-z` option. All other files in the input directory will be ignored. Implies `-u` (unordered output for normal files, but maintains order for `--last` files). Requires at least one `-z` argument to be effective. If no `-z` arguments are provided with `-Z`, it will result in an error.
-- `-w, --no-markdownlint-fixes`: Disable fixes for Markdown linting. By default, the output is formatted to be compatible with Markdown linters, which adds a top-level heading and slightly different file headers.
-- `-t, --no-gitignore`: Disable `.gitignore` rule processing. By default, DirCat respects `.gitignore` rules in the input directory and its parent directories.
-- `-g, --gitignore <path>`: Use `.gitignore` rules from a specific path instead of the default directory or its parents. If the specified path does not exist or is not a valid `.gitignore` file, a warning will be shown, and gitignore processing might not work as expected.
-- `-o, --output <file>`: Output to the specified file instead of standard output (stdout).
-- `-L, --line-numbers`: Show line numbers in output.
+- `-m, --max-size <bytes>`: Sets the maximum file size in bytes to process. Files exceeding this limit are ignored. Default: no limit.
+- `-n, --no-recursive`: Disables recursive directory searching. Only files in the specified top-level directory will be processed.
+- `-e, --ext <ext>`: Specifies file extensions to include in processing. Can be used multiple times to include several extensions (e.g., `-e cpp h`).
+- `-x, --exclude-ext <ext>`: Specifies file extensions to exclude from processing.  Use multiple times to exclude several extensions (e.g., `-x tmp log`).
+- `-d, --dot-folders`: Includes folders starting with a dot (e.g., `.git`, `.vscode`), which are ignored by default.
+- `-i, --ignore <item>`: Ignores specific folders or files. Paths are relative to the input directory. Can be used multiple times to ignore multiple items (e.g., `-i build temp.txt`). For directories, all content within is skipped. Specify folder names (like `build`), or relative paths (like `subdir/temp.txt`).
+- `-r, --regex <pattern>`: Excludes files where the filename matches the given regex pattern. Regex is applied to the filename only. Use multiple times for several patterns (e.g., `-r "\.tmp$" "backup"`).
+- `-c, --remove-comments`: Removes C++ style comments (`//` and `/* ... */`) from code files in the output.
+- `-l, --remove-empty-lines`: Removes empty lines from the output, enhancing readability.
+- `-f, --filename-only`: Displays only the filename in file headers, omitting the relative path from the input directory.
+- `-u, --unordered`: Outputs files as they are processed, potentially faster for large directories, but output order is not guaranteed (except for `-z` files). Default behavior if `-z` or `-Z` are not used.
+- `-z, --last <item>`: Processes specified files or directories last, in the order given. Useful for controlling output order. Specify directory paths, exact filenames (relative paths), or just filenames. Paths are relative to the input directory.
+- `-Z, --only-last`: **Exclusive mode**: Only processes files and directories specified with `-z`, ignoring all other directory content. Implies `-u` and requires at least one `-z` argument.
+- `-w, --no-markdownlint-fixes`: Disables Markdown linting compatibility fixes, providing a plain output format.
+- `-t, --no-gitignore`: Disables `.gitignore` rule processing. By default, DirCat respects `.gitignore` rules.
+- `-g, --gitignore <path>`: Specifies a custom `.gitignore` file path. If the path is invalid, a warning is shown, and gitignore processing might be affected.
+- `-o, --output <file>`: Redirects output to the specified file instead of stdout.
+- `-L, --line-numbers`: Prepends line numbers to each line in the output.
 
 ### Examples
 
@@ -37,123 +37,171 @@ Display all files in the current directory:
 ./dircat .
 ```
 
-Process only C++ files (`.cpp`, `.h`, `.hpp`) up to 1MB in size, recursively, and remove C++ comments:
+Process C++ source files recursively, up to 1MB each, removing comments:
 
 ```bash
 ./dircat . -m 1048576 -e cpp h hpp -c
 ```
 
-Process files in the current directory without recursion, excluding `.txt` files:
+Process non-recursively, excluding `.txt` files:
 
 ```bash
 ./dircat . --no-recursive -x txt
 ```
 
-Ignore `build` folder and `temp.log` file, and folders named `cache` anywhere in the path:
+Ignore `build`, `temp.log`, and any `cache` folders:
 
 ```bash
 ./dircat . --ignore build temp.log cache
 ```
 
-Include folders starting with a dot (like `.git` or `.vscode`):
+Include dot folders:
 
 ```bash
 ./dircat . --dot-folders
 ```
 
-Exclude all files ending with `.tmp` or `.log` using regex:
+Exclude `.tmp` and `.log` files using regex:
 
 ```bash
 ./dircat . -r "\.tmp$" "\.log$"
 ```
 
-Exclude files containing the word "backup" in their filename using regex:
+Exclude files with "backup" in the filename:
 
 ```bash
 ./dircat . -r backup
 ```
 
-Process only files with extensions `cpp`, `c`, and `h`:
+Process `.cpp`, `.c`, and `.h` files only:
 
 ```bash
 ./dircat . -e cpp c h
 ```
 
-Exclude `.min.js` files, but include other `.js` files:
+Process `.js` files, excluding `.min.js`:
 
 ```bash
 ./dircat . -e js -x min.js
 ```
 
-Remove C++ comments and empty lines from the output:
+Remove comments and empty lines:
 
 ```bash
 ./dircat . -c -l
 ```
 
-Show only filenames in the output (no paths):
+Show filenames only in headers:
 
 ```bash
 ./dircat . -f
 ```
 
-Output files in an unordered fashion (may be faster for large directories):
+Unordered output for speed:
 
 ```bash
 ./dircat . -u
 ```
 
-Process `important_config.h` and the `docs` directory last, in that order:
+Process `important_config.h` and `docs` directory last:
 
 ```bash
 ./dircat . -z important_config.h docs
 ```
 
-Process all files normally, but ensure `README.md` is always at the very end of the output:
+Ensure `README.md` is always at the end:
 
 ```bash
 ./dircat . -z README.md
 ```
 
-*Only* process `main.cpp`, `utils.h`, and all files within the `src/` directory, excluding everything else:
+*Only* process `main.cpp`, `utils.h`, and `src/` directory:
 
 ```bash
 ./dircat . -Z -z main.cpp utils.h src/
 ```
 
-Disable Markdown linting fixes for plain output:
+Disable Markdown linting fixes for plain text output:
 
 ```bash
 ./dircat . -w
 ```
 
-Disable gitignore processing entirely:
+Disable gitignore processing:
 
 ```bash
 ./dircat . -t
 ```
 
-Use gitignore rules from a specific file located at `/path/to/custom.gitignore`:
+Use custom gitignore from `/path/to/custom.gitignore`:
 
 ```bash
 ./dircat . -g /path/to/custom.gitignore
 ```
 
-Output the result to a file named `output.md` instead of printing to the console:
+Output to `output.md` file:
 
 ```bash
 ./dircat . -o output.md
 ```
 
-Example of usage in large C# projects, recursively processing `.cs` files, removing empty lines and comments, and processing specific dependency files last:
+Process `.js` and `.html`, remove empty lines, output to `web_files.txt`:
+
+```bash
+./dircat ./web-project -e js html -l -o web_files.txt
+```
+
+Process all except `.log` and `.tmp` in `logs`, ignore gitignore:
+
+```bash
+./dircat . -x log tmp -i logs -t
+```
+
+Process `.md` files, filename headers, output to `docs_combined.md`:
+
+```bash
+./dircat ./documentation -e md -f -o docs_combined.md
+```
+
+Process Python and Javascript, remove comments/empty lines, output to `code_bundle.txt`:
+
+```bash
+./dircat ./project -e py js -c -l -o code_bundle.txt
+```
+
+Ignore files > 50KB, and `node_modules` directory:
+
+```bash
+./dircat . -m 51200 -i node_modules
+```
+
+Combine `.css` and `.scss`, process `style.css` last, output to `styles.md`:
+
+```bash
+./dircat ./styles -e css scss -z style.css -o styles.md
+```
+
+Example for C# projects, process `.cs`, exclude Designer files, remove empty lines/comments, process deps last:
 
 ```bash
 ./dircat ./working-folder -e cs -r "\.Designer\.cs$" -l -c -z working-file-deps.cs working-file.cs
 ```
 
+Create Markdown from documentation, include dot folders, show line numbers, output to `documentation.md`:
+
+```bash
+./dircat ./docs -e md --dot-folders -L -o documentation.md
+```
+
+Use a custom gitignore from parent directory:
+
+```bash
+./dircat ./src -g ../.custom_gitignore
+```
+
 ### Output Format
 
-Files are output in the following format when Markdown linting fixes are enabled (default):
+Default Markdown-friendly output:
 
 ````md
 #
@@ -164,7 +212,7 @@ Files are output in the following format when Markdown linting fixes are enabled
 [file contents]
 ````
 
-If `-f` (filename only) is used, only the filename is shown in the header:
+Filename-only headers (`-f`):
 
 ````md
 #
@@ -175,7 +223,7 @@ If `-f` (filename only) is used, only the filename is shown in the header:
 [file contents]
 ````
 
-If `-w` (no Markdown linting fixes) is used, the output format is slightly different, omitting the top-level heading and using a level 3 heading for files:
+Plain output (`-w`):
 
 ````md
 ### File: relative/path/to/filename.ext
@@ -185,7 +233,7 @@ If `-w` (no Markdown linting fixes) is used, the output format is slightly diffe
 ```
 ````
 
-If `-L` (line-numbers) is used, each line of the file content will be prefixed with its line number:
+With line numbers (`-L`):
 
 ````md
 #
@@ -198,35 +246,35 @@ If `-L` (line-numbers) is used, each line of the file content will be prefixed w
 ...
 ````
 
-In all cases, the file extension (if available) is used to indicate the code block's language for syntax highlighting in Markdown.
+Multiple files are concatenated sequentially. Unordered output (`-u` or `-Z`) may alter the order, except for `-z` files which are always last and in order.
 
 ## Features
 
-- **High-performance multi-threaded processing:** Significantly reduces processing time by concurrently handling multiple files.
-- **Recursive directory traversal:**  Optionally explores subdirectories to process files in nested folders.
-- **Flexible file extension filtering:**  Include or exclude files based on specific extensions to target desired file types.
-- **Maximum file size limiting:**  Skip processing very large files to improve efficiency and manage output size.
-- **Customizable ignore rules:**  Exclude specific folders and files from processing, enhancing control over the output.
-- **Regular expression based filename filtering:** Exclude files based on complex filename patterns using regular expressions.
-- **Code comment removal:**  Clean code outputs by stripping C++ style comments (`//` and `/* ... */`).
-- **Empty line removal:**  Improve readability by removing blank lines from the concatenated output.
-- **Filename-only output option:**  Simplify file headers by displaying only filenames instead of full relative paths.
-- **Unordered output mode:**  Process and output files as quickly as possible, potentially increasing speed for large directories when order is not critical (default if `--last` options are not used).
-- **Prioritized "process last" feature:**  Process specific files and directories at the end, in a defined order, useful for controlling output order (e.g., placing README or important configuration files at the end).
-- **Exclusive "only last" processing:**  Focus solely on the files and directories specified with `--last`, ignoring all other directory content for highly selective processing.
-- **Markdown linting compatibility:**  Output is formatted with Markdown-friendly headers and code blocks, ensuring seamless integration with Markdown rendering and linting tools.
-- **`.gitignore` support:**  Automatically respects `.gitignore` rules, preventing accidental inclusion of unwanted files and directories commonly excluded in Git repositories.  It recursively checks `.gitignore` files in parent directories.
-- **Customizable `.gitignore` path:**  Allows specifying a custom `.gitignore` file path for projects with non-standard gitignore configurations.
-- **Line numbers in output:** Option to display line numbers prepended to each line of file content.
-- **Output redirection to file:**  Save the concatenated output directly to a file instead of displaying it in the console.
-- **Graceful interrupt handling:**  Stops processing and exits cleanly upon receiving an interrupt signal (e.g., Ctrl+C).
-- **Memory-efficient design:**  Processes files in a streaming manner to handle large files without excessive memory usage.
+- **High-Performance Multi-threading:** Utilizes CPU cores for parallel file processing, ensuring speed even in large directories.
+- **Recursive Directory Traversal:** Explores subdirectories to process entire project structures or documentation trees.
+- **Flexible File Extension Filtering:** Includes or excludes files based on extensions, targeting specific file types.
+- **Maximum File Size Limiting:** Skips large files to enhance efficiency and control output size.
+- **Customizable Ignore Rules:** Excludes specified folders and files, tailoring the output content.
+- **Regex-Based Filename Filtering:** Advanced filtering using regular expressions for complex filename patterns.
+- **Code Comment Removal:** Cleans code output by stripping C++ style comments.
+- **Empty Line Removal:** Improves readability by removing blank lines from the output.
+- **Filename-Only Output Option:** Simplifies headers by displaying only filenames.
+- **Unordered Output Mode:** Processes and outputs files quickly, ideal for large directories when order is not critical.
+- **Prioritized "Process Last" Feature:** Processes specific files/directories last, controlling output order for key files like READMEs.
+- **Exclusive "Only Last" Processing:** Focuses solely on `--last` specified files/directories, ignoring other content.
+- **Markdown Linting Compatibility:** Formats output with Markdown-friendly headers and code blocks for easy integration with Markdown tools.
+- **`.gitignore` Support:** Respects `.gitignore` rules, recursively checking parent directories to prevent inclusion of unwanted files.
+- **Customizable `.gitignore` Path:** Allows specifying a custom `.gitignore` file for non-standard project setups.
+- **Line Numbers in Output:** Option to prepend line numbers for easier referencing of content.
+- **Output Redirection to File:** Saves output directly to a file instead of console display.
+- **Graceful Interrupt Handling:** Stops processing cleanly upon interrupt signals (Ctrl+C).
+- **Memory-Efficient Design:** Streams file content to handle large files without excessive memory usage.
 
 ## Requirements
 
-- C++20 compatible compiler (like g++ >= 10, clang++ >= 10, MSVC >= 2019)
-- CMake 3.10 or higher for building
-- Standard C++ libraries (should be available on any system with a C++ compiler)
+- C++20 compatible compiler (g++ >= 10, clang++ >= 10, MSVC >= 2019)
+- CMake 3.10 or higher
+- Standard C++ libraries
 
 ## Building
 
@@ -244,7 +292,7 @@ In all cases, the file extension (if available) is used to indicate the code blo
     cd build
     ```
 
-3. **Configure with CMake (Release build recommended for performance):**
+3. **Configure CMake (Release build recommended):**
 
     ```bash
     cmake .. -DCMAKE_BUILD_TYPE=Release
@@ -256,28 +304,28 @@ In all cases, the file extension (if available) is used to indicate the code blo
     cmake --build . --config Release
     ```
 
-    The `dircat` executable will be created in the `build` directory (or `build/Release` on Windows for Release build). You can then run it from the `build` directory or copy it to a location in your system's PATH.
+    The `dircat` executable is created in the `build` directory (or `build/Release` on Windows). Run it from `build` or copy it to your system's PATH.
 
 ## Implementation Details
 
-- Implemented using modern C++20 features, including `<filesystem>` for path manipulation, `<thread>` for multi-threading, `<atomic>` for thread-safe operations, and `<regex>` for regular expression matching.
-- Limits the maximum number of threads used for file processing to the hardware concurrency or 8, whichever is lower, to balance performance and system load.
-- Processes files in chunks and streams file content to efficiently handle very large files without loading them entirely into memory.
-- Implements comment removal by parsing the code and tracking comment contexts (single-line and multi-line), string literals, and character literals to avoid accidental removal of code-like comment markers within strings or characters.
-- Employs buffered reading for efficient file input and output operations.
-- Supports flexible ordering of output, including the ability to process specific files or directories last, maintaining a user-defined order for these "last" items.
-- Implements `.gitignore` rule matching logic, supporting wildcards (`*`, `?`), directory patterns (`dir/`), negation (`!rule`), and correctly handles the precedence of rules as defined in the gitignore specification. It now recursively loads `.gitignore` rules from parent directories.
+- C++20 features: `<filesystem>`, `<thread>`, `<atomic>`, `<regex>`.
+- Thread limit: Hardware concurrency or 8 threads, whichever is lower.
+- Streaming file processing for memory efficiency.
+- Robust C++ comment removal logic.
+- Buffered I/O for performance.
+- Flexible output ordering, including "process last" prioritization.
+- Comprehensive `.gitignore` rule matching, with recursive parent directory checks.
 
 ## Error Handling
 
-- Gracefully handles file system errors, such as permission denied errors when accessing directories or files, skipping inaccessible items and continuing processing.
-- Skips files that exceed the specified maximum file size, preventing excessive memory usage and output.
-- Provides thread-safe error logging to `std::cerr`, ensuring that error messages from multiple threads are displayed correctly without interleaving.
-- Implements clean interrupt handling using signals, allowing users to stop the program gracefully with Ctrl+C without data corruption or abrupt termination.
-- Validates regular expressions provided by the user and reports errors for invalid regex patterns, preventing program crashes due to regex exceptions.
-- Uses robust mutex-based thread synchronization to protect shared resources and prevent race conditions, ensuring data integrity and program stability in multi-threaded execution.
-- Includes checks for common user errors, such as using `--only-last` without any `--last` arguments, or specifying non-existent files or directories with `--last` or `--ignore`, providing informative error messages and exiting gracefully in such cases.
-- Offers clear and informative error messages for invalid command-line arguments and options, guiding users to correct usage.
+- Graceful handling of file system errors (permission denied, etc.).
+- Skips files exceeding max size.
+- Thread-safe error logging to `std::cerr`.
+- Clean interrupt handling with signals.
+- Regex validation to prevent crashes.
+- Mutex-based thread synchronization for data integrity.
+- User error checks with informative messages (e.g., `--only-last` without `--last`).
+- Clear command-line argument error messages.
 
 ## License
 
