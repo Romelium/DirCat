@@ -16,18 +16,9 @@ int main(int argc, char *argv[]) {
 
   if (fs::is_regular_file(config.dirPath)) {
     config.showFilenameOnly = true;
-    if (process_file(config.dirPath, config, std::cout)) { // Pass std::cout
-      return 0;
-    } else {
-      return 1;
-    }
-    return 0;
+    return process_file(config.dirPath, config, std::cout) ? 0 : 1;
   } else if (fs::is_directory(config.dirPath)) {
-    if (process_directory(config, shouldStop)) {
-      return 0;
-    } else {
-      return 1;
-    }
+    return process_directory(config, shouldStop) ? 0 : 1;
   } else {
     std::cerr << "ERROR: Invalid path type: " << config.dirPath.string()
               << ". Expecting file or directory.\n";

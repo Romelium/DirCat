@@ -7,13 +7,12 @@
 #include <string>
 #include <vector>
 
-#include "lib.cpp" // Assuming the refactored lib.cpp is in the same directory
+#include "lib.cpp"
 
 namespace fs = std::filesystem;
 
 // --- Helper Functions for Testing ---
 
-// Creates a test file with given path and content.
 void create_test_file(const fs::path &path, const std::string &content) {
   std::ofstream file(path);
   if (!file.is_open()) {
@@ -23,9 +22,8 @@ void create_test_file(const fs::path &path, const std::string &content) {
   file << content;
 }
 
-// Creates a test directory structure in "test_dir".
 void create_test_directory_structure() {
-  fs::remove_all("test_dir"); // Ensure clean state
+  fs::remove_all("test_dir");
   fs::create_directories("test_dir/subdir1");
   fs::create_directories("test_dir/subdir2");
   fs::create_directories("test_dir/.hidden_dir");
@@ -35,22 +33,19 @@ void create_test_directory_structure() {
   create_test_file("test_dir/file1.cpp",
                    "// C++ file\nint main() { return 0; }");
   create_test_file("test_dir/file2.txt", "Text file content");
-  create_test_file("test_dir/FILE3.HPP",
-                   "// Header file\n#define FILE3_HPP"); // Uppercase extension
+  create_test_file("test_dir/FILE3.HPP", "// Header file\n#define FILE3_HPP");
   create_test_file("test_dir/file4.excluded", "Excluded file");
   create_test_file("test_dir/file5", "No extension file");
   create_test_file("test_dir/subdir1/file6.cpp", "// Subdir file");
   create_test_file("test_dir/.hidden_file.cpp", "// Hidden file");
   create_test_file("test_dir/ignored_folder/file7.cpp",
                    "// Ignored folder file");
-  create_test_file("test_dir/large_file.cpp", std::string(2049, 'L')); // > 2KB
+  create_test_file("test_dir/large_file.cpp", std::string(2049, 'L'));
   create_test_file("test_dir/.gitignore",
                    "*.txt\n.hidden_dir/\nignored_folder/");
   create_test_file("test_dir/not_ignored_folder/file8.cpp", "// Not ignored");
 }
 
-// Creates a test directory structure for gitignore testing in
-// "test_dir_gitignore".
 void create_test_directory_gitignore_structure() {
   fs::remove_all("test_dir_gitignore");
   fs::create_directories("test_dir_gitignore/subdir1");
@@ -68,13 +63,11 @@ void create_test_directory_gitignore_structure() {
                    "level1 file in subdir2");
 }
 
-// Cleans up the "test_dir" directory.
 void cleanup_test_directory() { fs::remove_all("test_dir"); }
 void cleanup_test_directory_gitignore() {
   fs::remove_all("test_dir_gitignore");
 }
 
-// Captures stdout output for testing console output.
 std::string capture_stdout(const std::function<void()> &func) {
   std::stringstream buffer;
   std::streambuf *oldCout = std::cout.rdbuf();
@@ -88,9 +81,9 @@ std::string capture_stdout(const std::function<void()> &func) {
 
 void test_format_file_output_line_numbers() {
   std::string content = "First line\nSecond line\nThird line";
-  std::string formatted_output = format_file_output(
-      "test_dir/line_numbers_file.cpp", false, false, "test_dir", content,
-      false, true); // showLineNumbers = true
+  std::string formatted_output =
+      format_file_output("test_dir/line_numbers_file.cpp", false, false,
+                         "test_dir", content, false, true);
   std::string expected_output = "\n## File: line_numbers_file.cpp\n\n```cpp\n"
                                 "1 | First line\n"
                                 "2 | Second line\n"
@@ -124,7 +117,6 @@ void test_is_path_ignored_by_gitignore() {
   config.dirPath = "test_dir";
   config.gitignorePath = "test_dir/.gitignore";
 
-  // --- Existing tests (still valid and important) ---
   assert(is_path_ignored_by_gitignore("test_dir/file2.txt", config.dirPath) ==
          true);
   assert(is_path_ignored_by_gitignore("test_dir/file1.cpp", config.dirPath) ==
@@ -136,17 +128,14 @@ void test_is_path_ignored_by_gitignore() {
   assert(is_path_ignored_by_gitignore("test_dir/ignored_folder/file7.cpp",
                                       config.dirPath) == true);
 
-  // --- Added tests for case-insensitivity ---
-
-  // Test case variation in extension case for *.txt rule
   assert(is_path_ignored_by_gitignore("test_dir/FILE2.TXT", config.dirPath) ==
-         true); // Uppercase extension
+         true);
   assert(is_path_ignored_by_gitignore("test_dir/file2.TxT", config.dirPath) ==
-         true); // Mixed case extension
+         true);
   assert(is_path_ignored_by_gitignore("test_dir/file2.tXt", config.dirPath) ==
-         true); // More mixed case
+         true);
   assert(is_path_ignored_by_gitignore("test_dir/file2.TXt", config.dirPath) ==
-         true); // Even more mixed case
+         true);
 
   std::cout << "Is path ignored by single gitignore test passed\n";
 }
@@ -157,18 +146,14 @@ void test_is_path_ignored_by_gitignore_multi_level() {
   config.dirPath = "test_dir_gitignore";
 
   auto check_ignored = [&](const fs::path &path) {
-    return is_path_ignored_by_gitignore(
-        path,
-        config
-            .dirPath); // Empty initial rules, rules are loaded in function now
+    return is_path_ignored_by_gitignore(path, config.dirPath);
   };
 
   assert(check_ignored("test_dir_gitignore/file1.level1") == true);
   assert(check_ignored("test_dir_gitignore/subdir1/file2.level2") == true);
   assert(check_ignored("test_dir_gitignore/subdir1/important.level2") == false);
   assert(check_ignored("test_dir_gitignore/subdir2/file3.level1") == true);
-  assert(check_ignored("test_dir_gitignore/subdir1/file4.txt") ==
-         false); // Not ignored by any rule
+  assert(check_ignored("test_dir_gitignore/subdir1/file4.txt") == false);
 
   cleanup_test_directory_gitignore();
   std::cout << "Is path ignored by multi-level gitignore test passed\n";
@@ -176,13 +161,13 @@ void test_is_path_ignored_by_gitignore_multi_level() {
 
 void test_is_file_size_valid() {
   create_test_file("test_dir/small_file.txt", "small");
-  create_test_file("test_dir/medium_file.txt", std::string(1024, 'M')); // 1KB
-  create_test_file("test_dir/large_file.txt", std::string(2049, 'L'));  // > 2KB
+  create_test_file("test_dir/medium_file.txt", std::string(1024, 'M'));
+  create_test_file("test_dir/large_file.txt", std::string(2049, 'L'));
 
   assert(is_file_size_valid("test_dir/small_file.txt", 1024) == true);
   assert(is_file_size_valid("test_dir/medium_file.txt", 1024) == true);
   assert(is_file_size_valid("test_dir/large_file.txt", 2048) == false);
-  assert(is_file_size_valid("test_dir/small_file.txt", 0) == true); // No limit
+  assert(is_file_size_valid("test_dir/small_file.txt", 0) == true);
   fs::remove("test_dir/small_file.txt");
   fs::remove("test_dir/medium_file.txt");
   fs::remove("test_dir/large_file.txt");
@@ -200,34 +185,34 @@ void test_is_file_extension_allowed() {
   assert(is_file_extension_allowed("test_dir/file.txt", allowed_exts,
                                    excluded_exts) == false);
   assert(is_file_extension_allowed("test_dir/file.excluded", allowed_exts,
-                                   excluded_exts) == false); // Excluded
+                                   excluded_exts) == false);
   assert(is_file_extension_allowed("test_dir/file.noext", {}, excluded_exts) ==
-         true); // No allowed exts, not excluded
+         true);
   assert(is_file_extension_allowed("test_dir/file.noext", allowed_exts, {}) ==
-         false); // Allowed exts specified, not in list
+         false);
   std::cout << "Is file extension allowed test passed\n";
 }
 
 void test_should_ignore_folder() {
-  Config base_config; // Using base config to avoid modifying defaults in tests
+  Config base_config;
   base_config.dirPath = "test_dir";
   base_config.gitignorePath = "test_dir/.gitignore";
 
-  assert(
-      should_ignore_folder("test_dir/.hidden_dir", base_config.disableGitignore,
-                           base_config.dirPath, base_config.ignoreDotFolders,
-                           base_config.ignoredFolders) == true); // Dot folder
+  assert(should_ignore_folder("test_dir/.hidden_dir",
+                              base_config.disableGitignore, base_config.dirPath,
+                              base_config.ignoreDotFolders,
+                              base_config.ignoredFolders) == true);
   assert(should_ignore_folder("test_dir/ignored_folder",
                               base_config.disableGitignore, base_config.dirPath,
                               base_config.ignoreDotFolders,
-                              base_config.ignoredFolders) == true); // Gitignore
-  assert(should_ignore_folder(
-             "test_dir/not_ignored_folder", base_config.disableGitignore,
-             base_config.dirPath, base_config.ignoreDotFolders,
-             base_config.ignoredFolders) == false); // Not ignored
+                              base_config.ignoredFolders) == true);
+  assert(should_ignore_folder("test_dir/not_ignored_folder",
+                              base_config.disableGitignore, base_config.dirPath,
+                              base_config.ignoreDotFolders,
+                              base_config.ignoredFolders) == false);
   assert(should_ignore_folder("test_dir/subdir1", base_config.disableGitignore,
                               base_config.dirPath, base_config.ignoreDotFolders,
-                              {"subdir1"}) == true); // Ignored folder list
+                              {"subdir1"}) == true);
   std::cout << "Should ignore folder test passed\n";
 }
 
@@ -242,18 +227,18 @@ void test_should_ignore_file() {
 
   assert(should_ignore_file("test_dir/file2.txt", base_config.disableGitignore,
                             base_config.dirPath, base_config.maxFileSizeB,
-                            base_config.ignoredFiles) == true); // Gitignore
+                            base_config.ignoredFiles) == true);
   assert(should_ignore_file("test_dir/ignore_me.txt",
                             base_config.disableGitignore, base_config.dirPath,
                             base_config.maxFileSizeB,
-                            {"ignore_me.txt"}) == true); // Ignored files list
+                            {"ignore_me.txt"}) == true);
   assert(should_ignore_file("test_dir/large_file.cpp",
                             base_config.disableGitignore, base_config.dirPath,
                             base_config.maxFileSizeB,
-                            base_config.ignoredFiles) == true); // Size limit
+                            base_config.ignoredFiles) == true);
   assert(should_ignore_file("test_dir/file1.cpp", base_config.disableGitignore,
                             base_config.dirPath, base_config.maxFileSizeB,
-                            base_config.ignoredFiles) == false); // Not ignored
+                            base_config.ignoredFiles) == false);
   fs::remove("test_dir/ignore_me.txt");
   fs::remove("test_dir/large_ignore.cpp");
   std::cout << "Should ignore file test passed\n";
@@ -264,8 +249,7 @@ void test_matches_regex_filters() {
   assert(matches_regex_filters("test_dir/file1.cpp", regex_filters) == true);
   assert(matches_regex_filters("test_dir/FILE3.HPP", regex_filters) == false);
   assert(matches_regex_filters("test_dir/file2.txt", regex_filters) == false);
-  assert(matches_regex_filters("test_dir/no_match.txt", {}) ==
-         false); // No filters
+  assert(matches_regex_filters("test_dir/no_match.txt", {}) == false);
   std::cout << "Matches regex filters test passed\n";
 }
 
@@ -304,14 +288,13 @@ void test_process_single_file() {
   std::string output =
       process_single_file("test_dir/process_test.cpp", 0, false, false, false,
                           "test_dir", false, false);
-  assert(output.find("Test file") != std::string::npos); // Content is included
-  assert(output.find("```cpp") != std::string::npos); // Language tag included
+  assert(output.find("Test file") != std::string::npos);
+  assert(output.find("```cpp") != std::string::npos);
 
   std::string output_no_comments =
       process_single_file("test_dir/process_test.cpp", 0, true, false, false,
                           "test_dir", false, false);
-  assert(output_no_comments.find("Test file") ==
-         std::string::npos); // Comment removed
+  assert(output_no_comments.find("Test file") == std::string::npos);
 
   fs::remove("test_dir/process_test.cpp");
   std::cout << "Process single file test passed\n";
@@ -340,19 +323,15 @@ void test_collect_files_normal() {
 
   int normal_count = 0;
   for (const auto &file : normal_files) {
-    if (file.filename() != "file2.txt" &&        // gitignored
-        file.filename() != ".hidden_file.cpp" && // dot file but not ignored yet
+    if (file.filename() != "file2.txt" &&
+        file.filename() != ".hidden_file.cpp" &&
         file.filename() != ".gitignore" &&
-        file.string().find("ignored_folder") ==
-            std::string::npos && // gitignored folder
-        file.string().find(".hidden_dir") ==
-            std::string::npos) // gitignored folder
-    {
+        file.string().find("ignored_folder") == std::string::npos &&
+        file.string().find(".hidden_dir") == std::string::npos) {
       normal_count++;
     }
   }
-  assert(normal_count ==
-         5); // FILE3.HPP, file1.cpp, file4.excluded, large_file.cpp, file6.cpp
+  assert(normal_count == 5);
 
   std::cout << "Collect files normal test passed\n";
 }
@@ -361,10 +340,8 @@ void test_collect_files_only_last() {
   Config config;
   config.dirPath = "test_dir";
   config.onlyLast = true;
-  config.lastFiles = {"file2.txt",
-                      "file1.cpp"}; // file2.txt is gitignored but should still
-                                    // be processed because --only-last
-  config.disableGitignore = true;   // Disable gitignore for this test
+  config.lastFiles = {"file2.txt", "file1.cpp"};
+  config.disableGitignore = true;
 
   std::atomic<bool> should_stop{false};
   auto [normal_files, last_files] = collect_files(config, should_stop);
@@ -388,7 +365,7 @@ void test_collect_files_only_last() {
 void test_process_file_chunk_unordered() {
   Config config;
   config.dirPath = "test_dir";
-  config.unorderedOutput = true; // Unordered output
+  config.unorderedOutput = true;
 
   std::vector<fs::path> files_to_process = {"test_dir/file1.cpp",
                                             "test_dir/FILE3.HPP"};
@@ -411,21 +388,18 @@ void test_process_file_chunk_unordered() {
 
   assert(processed_files == 2);
   assert(total_bytes > 0);
-  assert(
-      results.empty()); // Unordered, results should be empty, output to stdout
+  assert(results.empty());
   assert(output.find("File: file1.cpp") != std::string::npos ||
-         output.find("File: FILE3.HPP") !=
-             std::string::npos); // Check for filenames in output
+         output.find("File: FILE3.HPP") != std::string::npos);
   assert(output.find("File: file1.cpp") != std::string::npos &&
-         output.find("File: FILE3.HPP") !=
-             std::string::npos); // Check for both filenames in output
+         output.find("File: FILE3.HPP") != std::string::npos);
   std::cout << "Process file chunk unordered test passed\n";
 }
 
 void test_process_file_chunk_ordered() {
   Config config;
   config.dirPath = "test_dir";
-  config.unorderedOutput = false; // Ordered output
+  config.unorderedOutput = false;
 
   std::vector<fs::path> files_to_process = {"test_dir/file1.cpp",
                                             "test_dir/FILE3.HPP"};
@@ -436,7 +410,7 @@ void test_process_file_chunk_ordered() {
   std::mutex ordered_results_mutex;
   std::atomic<bool> should_stop{false};
 
-  capture_stdout([&]() { // Capture to avoid stdout in ordered test
+  capture_stdout([&]() {
     process_file_chunk(
         std::span{files_to_process.begin(), files_to_process.end()},
         config.unorderedOutput, config.removeComments, config.maxFileSizeB,
@@ -448,7 +422,7 @@ void test_process_file_chunk_ordered() {
 
   assert(processed_files == 2);
   assert(total_bytes > 0);
-  assert(results.size() == 2); // Ordered, results should have data
+  assert(results.size() == 2);
   assert(results[0].first.filename() == "file1.cpp");
   assert(results[1].first.filename() == "FILE3.HPP");
   std::cout << "Process file chunk ordered test passed\n";
@@ -457,27 +431,23 @@ void test_process_file_chunk_ordered() {
 void test_output_to_file() {
   Config config;
   config.dirPath = "test_dir";
-  config.outputFile = "test_output.txt"; // Set output file
+  config.outputFile = "test_output.txt";
   std::atomic<bool> should_stop{false};
 
-  std::string expected_content_part =
-      "File: file1.cpp"; // Part of expected output
+  std::string expected_content_part = "File: file1.cpp";
 
-  capture_stdout([&]() { // Capture stdout to prevent polluting test output
-    process_directory(config, should_stop);
-  });
+  capture_stdout([&]() { process_directory(config, should_stop); });
 
   std::ifstream outputFileStream("test_output.txt");
   std::string output_file_content(
       (std::istreambuf_iterator<char>(outputFileStream)),
       std::istreambuf_iterator<char>());
 
-  assert(outputFileStream.is_open()); // Check if file was created
-  assert(output_file_content.find(expected_content_part) !=
-         std::string::npos); // Check content
+  assert(outputFileStream.is_open());
+  assert(output_file_content.find(expected_content_part) != std::string::npos);
 
-  outputFileStream.close();      // Close the input file stream
-  fs::remove("test_output.txt"); // Cleanup output file
+  outputFileStream.close();
+  fs::remove("test_output.txt");
   std::cout << "Output to file test passed\n";
 }
 
