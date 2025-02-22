@@ -62,8 +62,10 @@ std::string normalize_path(const fs::path &path) {
 std::vector<std::string> load_gitignore_rules(const fs::path &gitignore_path) {
   std::vector<std::string> rules;
   std::ifstream file(gitignore_path);
-  if (!file.is_open())
+  if (!file.is_open()) {
+    std::cerr << "ERROR: Could not open gitignore file: " << normalize_path(gitignore_path) << '\n'; // Granular error reporting: path
     return rules;
+  }
   std::string line;
   while (std::getline(file, line)) {
     line = trim(line);
@@ -141,7 +143,7 @@ bool is_path_ignored_by_gitignore(const fs::path &path,
     relative_path = fs::relative(path, base_path);
   } catch (const std::exception &e) {
     std::cerr << "ERROR: Error getting relative path for gitignore check: "
-              << path.string() << ": " << e.what() << '\n';
+              << normalize_path(path) << ": " << e.what() << '\n'; // Granular error reporting: path
     return false;
   }
 
@@ -162,6 +164,7 @@ bool is_file_size_valid(const fs::path &path,
   try {
     return max_file_size_b == 0 || fs::file_size(path) <= max_file_size_b;
   } catch (const fs::filesystem_error &e) {
+    std::cerr << "ERROR: Could not get file size for: " << normalize_path(path) << ": " << e.what() << '\n'; // Granular error reporting: path
     return false;
   }
 }
@@ -198,7 +201,7 @@ bool should_ignore_folder(const fs::path &path, bool disableGitignore,
   try {
     relativePath = fs::relative(path, dirPath);
   } catch (const std::exception &e) {
-    std::cerr << "ERROR: Error getting relative path for " << path.string()
+    std::cerr << "ERROR: Error getting relative path for " << normalize_path(path) // Granular error reporting: path
               << ": " << e.what() << '\n';
     return false;
   }
@@ -235,7 +238,7 @@ bool matches_regex_filters(const fs::path &path,
       if (std::regex_search(filename, std::regex(regexStr)))
         return true;
     } catch (const std::regex_error &e) {
-      std::cerr << "ERROR: Invalid regex: " << regexStr << ": " << e.what()
+      std::cerr << "ERROR: Invalid regex: " << regexStr << ": " << e.what() // Already has regex string
                 << '\n';
     }
   }
@@ -336,7 +339,11 @@ std::string process_single_file(const fs::path &path,
                                 bool removeEmptyLines, bool showLineNumbers,
                                 bool dryRun) { // ADDED: dryRun
   std::ifstream file(path, std::ios::binary);
-  if (!file || !is_file_size_valid(path, maxFileSizeB))
+  if (!file) {
+    std::cerr << "ERROR: Could not open file: " << normalize_path(path) << '\n'; // Granular error reporting: path
+    return "";
+  }
+  if (!is_file_size_valid(path, maxFileSizeB))
     return "";
 
   if (dryRun) { // In dry-run mode, skip file content reading and processing
@@ -404,8 +411,8 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
           lastFilesList.push_back(absPath);
         }
       } else {
-        std::cerr << "ERROR: --only-last specified file not found or not a "
-                  << absPath << '\n';
+        std::cerr << "ERROR: --only-last specified file not found or not a file: " // Granular error reporting: file type
+                  << normalize_path(absPath) << '\n'; // Granular error reporting: path
         exit(1);
       }
     }
@@ -429,8 +436,8 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
           }
         }
       } else {
-        std::cerr << "ERROR: --only-last specified directory not found or not "
-                  << absDirPath << '\n';
+        std::cerr << "ERROR: --only-last specified directory not found or not a directory: " // Granular error reporting: file type
+                  << normalize_path(absDirPath) << '\n'; // Granular error reporting: path
         exit(1);
       }
     }
@@ -489,7 +496,7 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
     }
 
   } catch (const fs::filesystem_error &e) {
-    std::cerr << "ERROR: Error scanning directory: " << e.what() << '\n';
+    std::cerr << "ERROR: Error scanning directory: " << config.dirPath.string() << ": " << e.what() << '\n'; // Already has dir path
     return {normalFiles, lastFilesList};
   }
 
@@ -538,7 +545,7 @@ void process_file_chunk(std::span<const fs::path> chunk, bool unorderedOutput,
       }
       ++processed_files;
     } catch (const std::exception &e) {
-      std::cerr << "ERROR: Error processing " << path.string() << ": "
+      std::cerr << "ERROR: Error processing " << normalize_path(path) << ": " // Granular error reporting: path
                 << e.what() << '\n';
     }
   }
@@ -620,7 +627,7 @@ bool process_file(const fs::path &path, const Config &config,
                     << "\n"; // Normalized path for dry-run
     }
   } catch (const std::exception &e) {
-    std::cerr << "ERROR: Processing Single File: " << e.what() << '\n';
+    std::cerr << "ERROR: Processing Single File: " << normalize_path(path) << ": " << e.what() << '\n'; // Granular error reporting: path
     return false;
   }
   return true;
@@ -628,7 +635,7 @@ bool process_file(const fs::path &path, const Config &config,
 
 bool process_directory(Config config, std::atomic<bool> &should_stop) {
   if (!fs::exists(config.dirPath) || !fs::is_directory(config.dirPath)) {
-    std::cerr << "ERROR: Invalid directory path: " << config.dirPath.string()
+    std::cerr << "ERROR: Invalid directory path: " << config.dirPath.string() // Already has dir path
               << '\n';
     return false;
   }
@@ -640,7 +647,7 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
     if (!config.disableGitignore && !fs::exists(config.gitignorePath)) {
       std::cerr
           << "WARNING: Gitignore option used but no gitignore file found at: "
-          << config.gitignorePath << ". Ignoring gitignore.\n";
+          << normalize_path(config.gitignorePath) << ". Ignoring gitignore.\n"; // Granular error reporting: path
       config.disableGitignore = true;
     }
   }
@@ -660,7 +667,7 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
 
   if (normalFiles.empty() && lastFilesList.empty()) {
     if (!config.onlyLast) {
-      std::cout << "No matching files found in: " << config.dirPath.string()
+      std::cout << "No matching files found in: " << config.dirPath.string() // Already has dir path
                 << "\n";
     }
     return true;
@@ -676,7 +683,7 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
   if (!config.outputFile.empty()) {
     outputFileStream.open(config.outputFile);
     if (!outputFileStream.is_open()) {
-      std::cerr << "ERROR: Could not open output file: " << config.outputFile
+      std::cerr << "ERROR: Could not open output file: " << normalize_path(config.outputFile) // Granular error reporting: path
                 << '\n';
       return false;
     }
@@ -715,7 +722,7 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
             should_stop, output_stream, config.showLineNumbers,
             config.dryRun); // ADDED: dryRun
       } catch (const std::exception &e) {
-        std::cerr << "ERROR: Exception in thread: " << e.what() << '\n';
+        std::cerr << "ERROR: Exception in thread: " << e.what() << '\n'; // Generic thread error, no path context
       }
     });
   }
@@ -856,7 +863,7 @@ Config parse_arguments(int argc, char *argv[]) {
                 fs::relative(absoluteEntry, config.dirPath);
             config.ignoredFolders.emplace_back(relativeEntry);
           } catch (const std::exception &e) {
-            std::cerr << "ERROR: Invalid ignore path: " << absoluteEntry
+            std::cerr << "ERROR: Invalid ignore path: " << normalize_path(absoluteEntry) // Granular error reporting: path
                       << " is not under " << config.dirPath << '\n';
             exit(1);
           }
@@ -883,7 +890,7 @@ Config parse_arguments(int argc, char *argv[]) {
         try {
           relativeEntry = fs::relative(absoluteEntry, config.dirPath);
         } catch (const std::exception &e) {
-          std::cerr << "ERROR: Invalid last path: " << absoluteEntry
+          std::cerr << "ERROR: Invalid last path: " << normalize_path(absoluteEntry) // Granular error reporting: path
                     << " is not under " << config.dirPath << '\n';
           exit(1);
         }
@@ -910,7 +917,7 @@ Config parse_arguments(int argc, char *argv[]) {
       config.gitignorePath = argv[++i];
       if (!fs::exists(config.gitignorePath)) {
         std::cerr << "WARNING: Gitignore file not found at: "
-                  << config.gitignorePath
+                  << normalize_path(config.gitignorePath) // Granular error reporting: path
                   << ". Using gitignore might not work as expected.\n";
       }
     } else if ((arg == "-o" || arg == "--output") && i + 1 < argc) {
