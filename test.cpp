@@ -38,6 +38,9 @@ void create_test_directory_structure() {
   create_test_file("test_dir/.gitignore",
                    "*.txt\n.hidden_dir/\nignored_folder/");
   create_test_file("test_dir/not_ignored_folder/file8.cpp", "// Not ignored");
+  create_test_file("test_dir/file_abc.cpp", "// abc file");
+  create_test_file("test_dir/file_def.cpp", "// def file");
+  create_test_file("test_dir/misc.txt", "misc text file");
 }
 
 void create_test_directory_gitignore_structure() {
@@ -270,6 +273,18 @@ void test_matches_regex_filters() {
   std::cout << "Test: Matches regex filters passed\n";
 }
 
+void test_matches_filename_regex_filters() {
+    std::vector<std::string> filename_regex_filters = {"file_a.*\\.cpp", "file_d.*"};
+    assert(matches_filename_regex_filters("test_dir/file_abc.cpp", filename_regex_filters) == true);
+    assert(matches_filename_regex_filters("test_dir/file_def.cpp", filename_regex_filters) == true);
+    assert(matches_filename_regex_filters("test_dir/file_def.txt", filename_regex_filters) == true); // matches file_d.*
+    assert(matches_filename_regex_filters("test_dir/file1.cpp", filename_regex_filters) == false);
+    assert(matches_filename_regex_filters("test_dir/misc.txt", filename_regex_filters) == false);
+    assert(matches_filename_regex_filters("test_dir/no_match.txt", {}) == true);
+    std::cout << "Test: Matches filename regex filters passed\n";
+}
+
+
 void test_remove_cpp_comments() {
   std::string code_with_comments = "// Line comment\nint /* block */ main() "
                                    "{\n  return 0; // End comment\n}";
@@ -347,10 +362,30 @@ void test_collect_files_normal() {
       normal_count++;
     }
   }
-  assert(normal_count == 5);
+  assert(normal_count == 7);
 
   std::cout << "Test: Collect files normal passed\n";
 }
+
+void test_collect_files_filename_regex_filter() {
+    Config config;
+    config.dirPath = "test_dir";
+    config.filenameRegexFilters = {"file_a.*\\.cpp", "file_d.*"};
+    std::atomic<bool> should_stop{false};
+    auto [normal_files, last_files] = collect_files(config, should_stop);
+
+    assert(normal_files.size() == 2);
+    bool found_abc = false;
+    bool found_def = false;
+    for (const auto &file : normal_files) {
+        if (file.filename() == "file_abc.cpp") found_abc = true;
+        if (file.filename() == "file_def.cpp") found_def = true;
+    }
+    assert(found_abc);
+    assert(found_def);
+    std::cout << "Test: Collect files with filename regex filter passed\n";
+}
+
 
 void test_collect_files_only_last() {
   Config config;
@@ -458,6 +493,14 @@ void test_dry_run_mode() {
   assert(output.find("## File:") ==
          std::string::npos); // No file content formatting
 
+    // Test filename regex filter in dry run mode
+    Config regex_config = config;
+    regex_config.filenameRegexFilters = {"file_a.*\\.cpp", "file_d.*"};
+    std::string regex_output = capture_stdout([&]() { process_directory(regex_config, should_stop); });
+    assert(regex_output.find("file_abc.cpp") != std::string::npos);
+    assert(regex_output.find("file_def.cpp") != std::string::npos);
+    assert(regex_output.find("file1.cpp") == std::string::npos); // Should be filtered out
+
   std::cout << "Dry run mode test passed\n";
 }
 
@@ -474,11 +517,13 @@ int main() {
     test_should_ignore_folder();
     test_should_ignore_file();
     test_matches_regex_filters();
+    test_matches_filename_regex_filters();
     test_remove_cpp_comments();
     test_format_file_output();
     test_process_single_file();
     test_is_last_file();
     test_collect_files_normal();
+    test_collect_files_filename_regex_filter();
     test_collect_files_only_last();
     test_process_file_chunk_ordered(); // Renamed and corrected test
     test_output_to_file();

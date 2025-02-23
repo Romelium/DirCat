@@ -38,6 +38,7 @@ struct Config {
   fs::path outputFile;
   bool showLineNumbers = false;
   bool dryRun = false;
+  std::vector<std::string> filenameRegexFilters; // New option
 };
 
 // --- Utility Functions ---
@@ -310,6 +311,33 @@ bool matches_regex_filters(const fs::path &path,
   return false;
 }
 
+bool matches_filename_regex_filters(const fs::path &path,
+                                   const std::vector<std::string> &filename_regex_filters) {
+    if (filename_regex_filters.empty()) return true; // If no filters, match all filenames
+
+    const std::string filename = path.filename().string();
+    for (const auto &regexStr : filename_regex_filters) {
+        try {
+            {
+                std::shared_lock<std::shared_mutex> lock(regex_cache_mutex);
+                if (regex_cache.count(regexStr)) {
+                    if (std::regex_match(filename, regex_cache[regexStr])) return true;
+                }
+            }
+            std::regex compiled_regex(regexStr);
+            {
+                std::unique_lock<std::shared_mutex> lock(regex_cache_mutex);
+                regex_cache[regexStr] = compiled_regex;
+            }
+            if (std::regex_match(filename, compiled_regex)) return true;
+        } catch (const std::regex_error &e) {
+            std::cerr << "ERROR: Invalid filename regex: " << regexStr << ": " << e.what() << '\n';
+        }
+    }
+    return false;
+}
+
+
 std::string remove_cpp_comments(const std::string &code) {
   std::string result;
   bool inString = false;
@@ -536,7 +564,9 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
             !should_ignore_file(it->path(), config.disableGitignore,
                                 config.dirPath, config.maxFileSizeB,
                                 config.ignoredFiles, dir_gitignore_rules) &&
-            !matches_regex_filters(it->path(), config.regexFilters)) {
+            !matches_regex_filters(it->path(), config.regexFilters) &&
+            matches_filename_regex_filters(it->path(), config.filenameRegexFilters) // New filename regex filter
+            ) {
           if (is_last_file(it->path(), config.dirPath, config.lastFiles,
                            config.lastDirs)) {
             if (lastFilesSet.insert(it->path()).second) {
@@ -558,7 +588,9 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
             !should_ignore_file(it->path(), config.disableGitignore,
                                 config.dirPath, config.maxFileSizeB,
                                 config.ignoredFiles, dir_gitignore_rules) &&
-            !matches_regex_filters(it->path(), config.regexFilters)) {
+            !matches_regex_filters(it->path(), config.regexFilters) &&
+            matches_filename_regex_filters(it->path(), config.filenameRegexFilters) // New filename regex filter
+            ) {
           if (is_last_file(it->path(), config.dirPath, config.lastFiles,
                            config.lastDirs)) {
             if (lastFilesSet.insert(it->path()).second)
@@ -850,6 +882,7 @@ Config parse_arguments(int argc, char *argv[]) {
         {"-L, --line-numbers", "Show line numbers in output."},
         {"-D, --dry-run", "Dry-run: list files to be processed without "
                           "concatenating them."},
+        {"-d, --filename-regex <pattern>", "Include only files whose names match the regex pattern (can be used multiple times, grouped)."} // New option
     };
 
     size_t max_option_length = 0;
@@ -961,7 +994,11 @@ Config parse_arguments(int argc, char *argv[]) {
       config.showLineNumbers = true;
     } else if (arg == "-D" || arg == "--dry-run") {
       config.dryRun = true;
-    } else {
+    } else if ((arg == "-d" || arg == "--filename-regex") && i + 1 < argc) {
+      while (i + 1 < argc && argv[i + 1][0] != '-')
+        config.filenameRegexFilters.emplace_back(argv[++i]);
+    }
+    else {
       std::cerr << "Invalid option: " << arg << "\n";
       exit(1);
     }
