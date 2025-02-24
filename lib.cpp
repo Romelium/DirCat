@@ -738,7 +738,7 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
   std::ofstream outputFileStream;
   std::ostream *outputPtr = &std::cout;
   if (!config.outputFile.empty()) {
-    outputFileStream.open(config.outputFile);
+    outputFileStream.open(config.outputFile, std::ios::out);
     if (!outputFileStream.is_open()) {
       std::cerr << "ERROR: Could not open output file: "
                 << normalize_path(config.outputFile) << '\n';

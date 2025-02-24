@@ -467,6 +467,36 @@ void test_output_to_file() {
   std::cout << "Test: Output to file passed\n";
 }
 
+void test_output_file_creation() {
+  Config config;
+  config.dirPath = "test_dir";
+  config.outputFile = "non_existent_output_file.txt";
+  std::atomic<bool> should_stop{false};
+
+  // Ensure the output file does not exist before the test
+  fs::remove("non_existent_output_file.txt");
+  assert(!fs::exists("non_existent_output_file.txt"));
+
+  std::string expected_content_part = "File: file1.cpp";
+
+  capture_stdout([&]() { process_directory(config, should_stop); });
+
+  // Check if the output file is created
+  assert(fs::exists("non_existent_output_file.txt"));
+
+  std::ifstream outputFileStream("non_existent_output_file.txt");
+  std::string output_file_content(
+      (std::istreambuf_iterator<char>(outputFileStream)),
+      std::istreambuf_iterator<char>());
+
+  assert(outputFileStream.is_open());
+  assert(output_file_content.find(expected_content_part) != std::string::npos);
+
+  outputFileStream.close();
+  fs::remove("non_existent_output_file.txt");
+  std::cout << "Test: Output to non-existent file creates file passed\n";
+}
+
 void test_dry_run_mode() {
   Config config;
   config.dirPath = "test_dir";
@@ -527,6 +557,7 @@ int main() {
     test_collect_files_only_last();
     test_process_file_chunk_ordered(); // Renamed and corrected test
     test_output_to_file();
+    test_output_file_creation();
     test_format_file_output_line_numbers();
     test_is_path_ignored_by_gitignore_multi_level();
     test_dry_run_mode();
