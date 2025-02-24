@@ -783,7 +783,7 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
   std::ostream &output_stream = *outputPtr;
 
   if (config.dryRun) {
-    std::cout << "Files to be processed:\n";
+    output_stream << "Files to be processed:\n";
     for (const auto &file : normalFiles) {
       output_stream << normalize_path(fs::relative(file, config.dirPath))
                     << "\n";

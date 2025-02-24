@@ -543,6 +543,36 @@ void test_dry_run_mode() {
   std::cout << "Dry run mode test passed\n";
 }
 
+void test_dry_run_mode_output_file() {
+  Config config;
+  config.dirPath = "test_dir";
+  config.dryRun = true;
+  config.outputFile = "dry_run_output.txt";
+  std::atomic<bool> should_stop{false};
+
+  capture_stdout([&]() { process_directory(config, should_stop); });
+
+  std::ifstream outputFileStream("dry_run_output.txt");
+  std::string output_file_content(
+      (std::istreambuf_iterator<char>(outputFileStream)),
+      std::istreambuf_iterator<char>());
+
+  assert(outputFileStream.is_open());
+  assert(output_file_content.find("Files to be processed:") !=
+         std::string::npos);
+  assert(output_file_content.find("file1.cpp") != std::string::npos);
+  assert(output_file_content.find("FILE3.HPP") != std::string::npos);
+  assert(output_file_content.find("file2.txt") == std::string::npos);
+  assert(output_file_content.find("ignored_folder/file7.cpp") ==
+         std::string::npos);
+  assert(output_file_content.find("## File:") == std::string::npos);
+
+  outputFileStream.close();
+  fs::remove("dry_run_output.txt");
+
+  std::cout << "Dry run mode with output file test passed\n";
+}
+
 int main() {
   try {
     cleanup_test_directory();
@@ -570,6 +600,7 @@ int main() {
     test_format_file_output_line_numbers();
     test_is_path_ignored_by_gitignore_multi_level();
     test_dry_run_mode();
+    test_dry_run_mode_output_file();
 
     cleanup_test_directory();
     std::cout << "\nAll tests passed successfully!\n";
