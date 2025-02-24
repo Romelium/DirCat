@@ -913,8 +913,9 @@ Config parse_arguments(int argc, char *argv[]) {
         {"-L, --line-numbers", "Show line numbers in output."},
         {"-D, --dry-run", "Dry-run: list files to be processed without "
                           "concatenating them."},
-        {"-d, --filename-regex <pattern>", "Include only files whose names match the regex pattern (can be used multiple times, grouped)."} // New option
-    };
+        {"-d, --filename-regex <pattern>",
+         "Include only files whose names match the regex pattern (can be used "
+         "multiple times, grouped)."}};
 
     size_t max_option_length = 0;
     for (const auto &option : options) {
