@@ -540,7 +540,7 @@ void test_dry_run_mode() {
   assert(regex_output.find("file1.cpp") ==
          std::string::npos); // Should be filtered out
 
-  std::cout << "Dry run mode test passed\n";
+  std::cout << "Test: Dry run mode passed\n";
 }
 
 void test_dry_run_mode_output_file() {
@@ -570,7 +570,7 @@ void test_dry_run_mode_output_file() {
   outputFileStream.close();
   fs::remove("dry_run_output.txt");
 
-  std::cout << "Dry run mode with output file test passed\n";
+  std::cout << "Test: Dry run mode with output file passed\n";
 }
 
 int main() {
