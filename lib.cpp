@@ -762,6 +762,17 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
   std::ostream *outputPtr = &std::cout;
   if (!config.outputFile.empty()) {
     outputFileStream.open(config.outputFile, std::ios::out);
+    if (!config.outputFile.parent_path().empty() &&
+        !fs::exists(config.outputFile.parent_path())) {
+      std::cerr << "ERROR: Output file directory does not exist: "
+                << normalize_path(config.outputFile.parent_path()) << '\n';
+      return false;
+    }
+    if (fs::is_directory(config.outputFile)) {
+      std::cerr << "ERROR: Output file path is a directory: "
+                << normalize_path(config.outputFile) << '\n';
+      return false;
+    }
     if (!outputFileStream.is_open()) {
       std::cerr << "ERROR: Could not open output file: "
                 << normalize_path(config.outputFile) << '\n';
