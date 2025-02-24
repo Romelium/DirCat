@@ -13,6 +13,7 @@ DirCat is a high-performance C++ utility that concatenates and displays the cont
 - `-m, --max-size <bytes>`: Sets the maximum file size in bytes to process. Files exceeding this limit are ignored. Useful for very large directories or when you want to skip processing extremely large files. Default: no limit.
 - `-n, --no-recursive`: Disables recursive directory searching. Only files in the specified top-level directory will be processed, and subdirectories will be skipped.
 - `-e, --ext <ext>`: Specifies file extensions to **include** in processing. Only files with these extensions will be processed. Can be used multiple times to include several extensions (e.g., `-e cpp h` to process `.cpp` and `.h` files).
+- `-d, --filename-regex <pattern>`: Include only files where the **filename** matches the given regex pattern. The regex is applied to the filename only (not the full path). Use multiple times for several patterns to include files matching any of the provided patterns (e.g., `-d "file_a.*\.cpp" "file_d.*"` to include files starting with "file_a" or "file_d"). Regular expressions use the ECMAScript syntax.
 - `-x, --exclude-ext <ext>`: Specifies file extensions to **exclude** from processing. Files with these extensions will be skipped. Use multiple times to exclude several extensions (e.g., `-x tmp log` to exclude `.tmp` and `.log` files).
 - `-i, --ignore <item>`: Ignores specific folders or files. Paths are relative to the input directory provided as the first argument. Can be used multiple times to ignore multiple items (e.g., `-i build temp.txt`). For directories, all content within is skipped. Specify folder names (like `build`), relative paths to folders (like `subdir/data`), relative paths to files (like `temp.txt`), or folder/file names.
 - `-r, --regex <pattern>`: Excludes files where the **filename** matches the given regex pattern. The regex is applied to the filename only (not the full path). Use multiple times for several patterns (e.g., `-r "\.tmp$" "backup"` to exclude files ending with `.tmp` or containing "backup" in their name). Regular expressions use the ECMAScript syntax.
@@ -64,6 +65,12 @@ Exclude files with "backup" or "temp" in their filename:
 ./dircat . -r backup temp
 ```
 
+Exclude files with *either* `*_test.cpp` suffix *or* `test_*.cpp` prefix::
+
+```bash
+./dircat . -r "^test_.*\\.cpp$|.*_test\\.cpp$"
+```
+
 Process only `.cpp`, `.c`, and `.h` files:
 
 ```bash
@@ -74,6 +81,12 @@ Process `.js` files, excluding `.min.js` files:
 
 ```bash
 ./dircat . -e js -x min.js
+```
+
+Only include files with *either* `*_test.cpp` suffix *or* `test_*.cpp` prefix::
+
+```bash
+./dircat . -d "^test_.*\\.cpp$|.*_test\\.cpp$"
 ```
 
 Remove comments and empty lines from the output:
