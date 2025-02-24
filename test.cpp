@@ -274,16 +274,22 @@ void test_matches_regex_filters() {
 }
 
 void test_matches_filename_regex_filters() {
-    std::vector<std::string> filename_regex_filters = {"file_a.*\\.cpp", "file_d.*"};
-    assert(matches_filename_regex_filters("test_dir/file_abc.cpp", filename_regex_filters) == true);
-    assert(matches_filename_regex_filters("test_dir/file_def.cpp", filename_regex_filters) == true);
-    assert(matches_filename_regex_filters("test_dir/file_def.txt", filename_regex_filters) == true); // matches file_d.*
-    assert(matches_filename_regex_filters("test_dir/file1.cpp", filename_regex_filters) == false);
-    assert(matches_filename_regex_filters("test_dir/misc.txt", filename_regex_filters) == false);
-    assert(matches_filename_regex_filters("test_dir/no_match.txt", {}) == true);
-    std::cout << "Test: Matches filename regex filters passed\n";
+  std::vector<std::string> filename_regex_filters = {"file_a.*\\.cpp",
+                                                     "file_d.*"};
+  assert(matches_filename_regex_filters("test_dir/file_abc.cpp",
+                                        filename_regex_filters) == true);
+  assert(matches_filename_regex_filters("test_dir/file_def.cpp",
+                                        filename_regex_filters) == true);
+  assert(matches_filename_regex_filters("test_dir/file_def.txt",
+                                        filename_regex_filters) ==
+         true); // matches file_d.*
+  assert(matches_filename_regex_filters("test_dir/file1.cpp",
+                                        filename_regex_filters) == false);
+  assert(matches_filename_regex_filters("test_dir/misc.txt",
+                                        filename_regex_filters) == false);
+  assert(matches_filename_regex_filters("test_dir/no_match.txt", {}) == true);
+  std::cout << "Test: Matches filename regex filters passed\n";
 }
-
 
 void test_remove_cpp_comments() {
   std::string code_with_comments = "// Line comment\nint /* block */ main() "
@@ -368,24 +374,25 @@ void test_collect_files_normal() {
 }
 
 void test_collect_files_filename_regex_filter() {
-    Config config;
-    config.dirPath = "test_dir";
-    config.filenameRegexFilters = {"file_a.*\\.cpp", "file_d.*"};
-    std::atomic<bool> should_stop{false};
-    auto [normal_files, last_files] = collect_files(config, should_stop);
+  Config config;
+  config.dirPath = "test_dir";
+  config.filenameRegexFilters = {"file_a.*\\.cpp", "file_d.*"};
+  std::atomic<bool> should_stop{false};
+  auto [normal_files, last_files] = collect_files(config, should_stop);
 
-    assert(normal_files.size() == 2);
-    bool found_abc = false;
-    bool found_def = false;
-    for (const auto &file : normal_files) {
-        if (file.filename() == "file_abc.cpp") found_abc = true;
-        if (file.filename() == "file_def.cpp") found_def = true;
-    }
-    assert(found_abc);
-    assert(found_def);
-    std::cout << "Test: Collect files with filename regex filter passed\n";
+  assert(normal_files.size() == 2);
+  bool found_abc = false;
+  bool found_def = false;
+  for (const auto &file : normal_files) {
+    if (file.filename() == "file_abc.cpp")
+      found_abc = true;
+    if (file.filename() == "file_def.cpp")
+      found_def = true;
+  }
+  assert(found_abc);
+  assert(found_def);
+  std::cout << "Test: Collect files with filename regex filter passed\n";
 }
-
 
 void test_collect_files_only_last() {
   Config config;
@@ -523,13 +530,15 @@ void test_dry_run_mode() {
   assert(output.find("## File:") ==
          std::string::npos); // No file content formatting
 
-    // Test filename regex filter in dry run mode
-    Config regex_config = config;
-    regex_config.filenameRegexFilters = {"file_a.*\\.cpp", "file_d.*"};
-    std::string regex_output = capture_stdout([&]() { process_directory(regex_config, should_stop); });
-    assert(regex_output.find("file_abc.cpp") != std::string::npos);
-    assert(regex_output.find("file_def.cpp") != std::string::npos);
-    assert(regex_output.find("file1.cpp") == std::string::npos); // Should be filtered out
+  // Test filename regex filter in dry run mode
+  Config regex_config = config;
+  regex_config.filenameRegexFilters = {"file_a.*\\.cpp", "file_d.*"};
+  std::string regex_output =
+      capture_stdout([&]() { process_directory(regex_config, should_stop); });
+  assert(regex_output.find("file_abc.cpp") != std::string::npos);
+  assert(regex_output.find("file_def.cpp") != std::string::npos);
+  assert(regex_output.find("file1.cpp") ==
+         std::string::npos); // Should be filtered out
 
   std::cout << "Dry run mode test passed\n";
 }

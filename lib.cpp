@@ -6,6 +6,7 @@
 #include <iostream>
 #include <mutex>
 #include <regex>
+#include <shared_mutex> // For read-write mutex
 #include <span>
 #include <sstream>
 #include <string>
@@ -14,7 +15,6 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include <shared_mutex> // For read-write mutex
 
 namespace fs = std::filesystem;
 
@@ -66,7 +66,6 @@ static std::shared_mutex gitignore_cache_mutex;
 // Static cache for compiled regex patterns (rule string -> regex)
 static std::unordered_map<std::string, std::regex> regex_cache;
 static std::shared_mutex regex_cache_mutex;
-
 
 std::vector<std::string> load_gitignore_rules(const fs::path &gitignore_path) {
   std::string cache_key = normalize_path(gitignore_path);
@@ -156,9 +155,10 @@ bool matches_gitignore_rule(const fs::path &path, const std::string &rule) {
   return false;
 }
 
-bool is_path_ignored_by_gitignore(const fs::path &path,
-                                  const fs::path &base_path,
-                                  const std::unordered_map<std::string, std::vector<std::string>>& dir_gitignore_rules) {
+bool is_path_ignored_by_gitignore(
+    const fs::path &path, const fs::path &base_path,
+    const std::unordered_map<std::string, std::vector<std::string>>
+        &dir_gitignore_rules) {
   // Explicitly ignore .git directory
   for (const auto &component : path) {
     if (component == ".git") {
@@ -174,8 +174,9 @@ bool is_path_ignored_by_gitignore(const fs::path &path,
          current_path.has_relative_path()) {
     std::string normalized_current_path = normalize_path(current_path);
     if (dir_gitignore_rules.count(normalized_current_path)) {
-      const auto& rules = dir_gitignore_rules.at(normalized_current_path);
-      accumulated_rules.insert(accumulated_rules.begin(), rules.begin(), rules.end());
+      const auto &rules = dir_gitignore_rules.at(normalized_current_path);
+      accumulated_rules.insert(accumulated_rules.begin(), rules.begin(),
+                               rules.end());
     }
     if (current_path == current_base)
       break;
@@ -242,11 +243,13 @@ bool is_file_extension_allowed(
          extensions.end();
 }
 
-bool should_ignore_folder(const fs::path &path, bool disableGitignore,
-                          const fs::path &dirPath,
-                          const std::vector<fs::path> &ignoredFolders,
-                          const std::unordered_map<std::string, std::vector<std::string>>& dir_gitignore_rules) {
-  if (!disableGitignore && is_path_ignored_by_gitignore(path, dirPath, dir_gitignore_rules))
+bool should_ignore_folder(
+    const fs::path &path, bool disableGitignore, const fs::path &dirPath,
+    const std::vector<fs::path> &ignoredFolders,
+    const std::unordered_map<std::string, std::vector<std::string>>
+        &dir_gitignore_rules) {
+  if (!disableGitignore &&
+      is_path_ignored_by_gitignore(path, dirPath, dir_gitignore_rules))
     return true;
 
   fs::path relativePath;
@@ -266,12 +269,13 @@ bool should_ignore_folder(const fs::path &path, bool disableGitignore,
   return false;
 }
 
-bool should_ignore_file(const fs::path &path, bool disableGitignore,
-                        const fs::path &dirPath,
-                        unsigned long long maxFileSizeB,
-                        const std::vector<fs::path> &ignoredFiles,
-                        const std::unordered_map<std::string, std::vector<std::string>>& dir_gitignore_rules) {
-  if (!disableGitignore && is_path_ignored_by_gitignore(path, dirPath, dir_gitignore_rules))
+bool should_ignore_file(
+    const fs::path &path, bool disableGitignore, const fs::path &dirPath,
+    unsigned long long maxFileSizeB, const std::vector<fs::path> &ignoredFiles,
+    const std::unordered_map<std::string, std::vector<std::string>>
+        &dir_gitignore_rules) {
+  if (!disableGitignore &&
+      is_path_ignored_by_gitignore(path, dirPath, dir_gitignore_rules))
     return true;
   if (!is_file_size_valid(path, maxFileSizeB))
     return true;
@@ -311,32 +315,36 @@ bool matches_regex_filters(const fs::path &path,
   return false;
 }
 
-bool matches_filename_regex_filters(const fs::path &path,
-                                   const std::vector<std::string> &filename_regex_filters) {
-    if (filename_regex_filters.empty()) return true; // If no filters, match all filenames
+bool matches_filename_regex_filters(
+    const fs::path &path,
+    const std::vector<std::string> &filename_regex_filters) {
+  if (filename_regex_filters.empty())
+    return true; // If no filters, match all filenames
 
-    const std::string filename = path.filename().string();
-    for (const auto &regexStr : filename_regex_filters) {
-        try {
-            {
-                std::shared_lock<std::shared_mutex> lock(regex_cache_mutex);
-                if (regex_cache.count(regexStr)) {
-                    if (std::regex_match(filename, regex_cache[regexStr])) return true;
-                }
-            }
-            std::regex compiled_regex(regexStr);
-            {
-                std::unique_lock<std::shared_mutex> lock(regex_cache_mutex);
-                regex_cache[regexStr] = compiled_regex;
-            }
-            if (std::regex_match(filename, compiled_regex)) return true;
-        } catch (const std::regex_error &e) {
-            std::cerr << "ERROR: Invalid filename regex: " << regexStr << ": " << e.what() << '\n';
+  const std::string filename = path.filename().string();
+  for (const auto &regexStr : filename_regex_filters) {
+    try {
+      {
+        std::shared_lock<std::shared_mutex> lock(regex_cache_mutex);
+        if (regex_cache.count(regexStr)) {
+          if (std::regex_match(filename, regex_cache[regexStr]))
+            return true;
         }
+      }
+      std::regex compiled_regex(regexStr);
+      {
+        std::unique_lock<std::shared_mutex> lock(regex_cache_mutex);
+        regex_cache[regexStr] = compiled_regex;
+      }
+      if (std::regex_match(filename, compiled_regex))
+        return true;
+    } catch (const std::regex_error &e) {
+      std::cerr << "ERROR: Invalid filename regex: " << regexStr << ": "
+                << e.what() << '\n';
     }
-    return false;
+  }
+  return false;
 }
-
 
 std::string remove_cpp_comments(const std::string &code) {
   std::string result;
@@ -393,15 +401,16 @@ std::string remove_cpp_comments(const std::string &code) {
   return result;
 }
 
-std::string format_file_output(const fs::path &path,
-                               bool showFilenameOnly, const fs::path &dirPath,
+std::string format_file_output(const fs::path &path, bool showFilenameOnly,
+                               const fs::path &dirPath,
                                const std::string &file_content,
                                bool removeEmptyLines, bool showLineNumbers) {
   std::stringstream content;
   content << "\n## File: "
           << (!showFilenameOnly ? fs::relative(path, dirPath).string()
                                 : path.filename().string())
-          << "\n" << "\n```";
+          << "\n"
+          << "\n```";
   if (path.has_extension())
     content << path.extension().string().substr(1);
   content << "\n";
@@ -423,11 +432,11 @@ std::string format_file_output(const fs::path &path,
   return content.str();
 }
 
-std::string
-process_single_file(const fs::path &path, unsigned long long maxFileSizeB,
-                    bool removeComments,
-                    bool showFilenameOnly, const fs::path &dirPath,
-                    bool removeEmptyLines, bool showLineNumbers, bool dryRun) {
+std::string process_single_file(const fs::path &path,
+                                unsigned long long maxFileSizeB,
+                                bool removeComments, bool showFilenameOnly,
+                                const fs::path &dirPath, bool removeEmptyLines,
+                                bool showLineNumbers, bool dryRun) {
   std::ifstream file(path, std::ios::binary);
   if (!file) {
     std::cerr << "ERROR: Could not open file: " << normalize_path(path) << '\n';
@@ -437,8 +446,8 @@ process_single_file(const fs::path &path, unsigned long long maxFileSizeB,
     return "";
 
   if (dryRun) {
-    return format_file_output(path, showFilenameOnly,
-                              dirPath, "", removeEmptyLines, showLineNumbers);
+    return format_file_output(path, showFilenameOnly, dirPath, "",
+                              removeEmptyLines, showLineNumbers);
   }
 
   std::string fileContent((std::istreambuf_iterator<char>(file)),
@@ -448,9 +457,8 @@ process_single_file(const fs::path &path, unsigned long long maxFileSizeB,
     fileContent = remove_cpp_comments(fileContent);
   }
 
-  return format_file_output(path, showFilenameOnly,
-                            dirPath, fileContent, removeEmptyLines,
-                            showLineNumbers);
+  return format_file_output(path, showFilenameOnly, dirPath, fileContent,
+                            removeEmptyLines, showLineNumbers);
 }
 
 // --- File Collection ---
@@ -484,19 +492,20 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
   if (!config.disableGitignore) {
     std::filesystem::recursive_directory_iterator gitignore_it(
         config.dirPath, fs::directory_options::skip_permission_denied);
-    for (const auto& dir_entry : gitignore_it) {
-      if (dir_entry.is_regular_file() && dir_entry.path().filename() == ".gitignore") {
-        dir_gitignore_rules[normalize_path(dir_entry.path().parent_path())] = load_gitignore_rules(dir_entry.path());
+    for (const auto &dir_entry : gitignore_it) {
+      if (dir_entry.is_regular_file() &&
+          dir_entry.path().filename() == ".gitignore") {
+        dir_gitignore_rules[normalize_path(dir_entry.path().parent_path())] =
+            load_gitignore_rules(dir_entry.path());
       }
     }
   }
 
-
   auto shouldSkipDirectory = [&](const fs::path &dirPath) {
     return fs::is_directory(dirPath) &&
            should_ignore_folder(dirPath, config.disableGitignore,
-                                config.dirPath,
-                                config.ignoredFolders, dir_gitignore_rules);
+                                config.dirPath, config.ignoredFolders,
+                                dir_gitignore_rules);
   };
 
   if (config.onlyLast) {
@@ -565,8 +574,10 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
                                 config.dirPath, config.maxFileSizeB,
                                 config.ignoredFiles, dir_gitignore_rules) &&
             !matches_regex_filters(it->path(), config.regexFilters) &&
-            matches_filename_regex_filters(it->path(), config.filenameRegexFilters) // New filename regex filter
-            ) {
+            matches_filename_regex_filters(
+                it->path(),
+                config.filenameRegexFilters) // New filename regex filter
+        ) {
           if (is_last_file(it->path(), config.dirPath, config.lastFiles,
                            config.lastDirs)) {
             if (lastFilesSet.insert(it->path()).second) {
@@ -589,8 +600,10 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
                                 config.dirPath, config.maxFileSizeB,
                                 config.ignoredFiles, dir_gitignore_rules) &&
             !matches_regex_filters(it->path(), config.regexFilters) &&
-            matches_filename_regex_filters(it->path(), config.filenameRegexFilters) // New filename regex filter
-            ) {
+            matches_filename_regex_filters(
+                it->path(),
+                config.filenameRegexFilters) // New filename regex filter
+        ) {
           if (is_last_file(it->path(), config.dirPath, config.lastFiles,
                            config.lastDirs)) {
             if (lastFilesSet.insert(it->path()).second)
@@ -614,27 +627,33 @@ collect_files(const Config &config, std::atomic<bool> &should_stop) {
 
 // --- File Processing ---
 
-void process_file_chunk(
-    std::span<const fs::path> chunk, bool removeComments,
-    unsigned long long maxFileSizeB, bool showFilenameOnly, const fs::path &dirPath, bool removeEmptyLines,
-    std::vector<std::pair<fs::path, std::string>> &results, // Shared result vector (for final sort)
-    std::atomic<size_t> &processed_files, std::atomic<size_t> &total_bytes,
-    std::mutex &console_mutex, std::mutex &ordered_results_mutex,
-    std::atomic<bool> &should_stop, std::ostream &output_stream,
-    bool showLineNumbers, bool dryRun,
-    std::vector<std::pair<fs::path, std::string>>& thread_local_results // Thread-local result buffer
-    ) {
+void process_file_chunk(std::span<const fs::path> chunk, bool removeComments,
+                        unsigned long long maxFileSizeB, bool showFilenameOnly,
+                        const fs::path &dirPath, bool removeEmptyLines,
+                        std::vector<std::pair<fs::path, std::string>>
+                            &results, // Shared result vector (for final sort)
+                        std::atomic<size_t> &processed_files,
+                        std::atomic<size_t> &total_bytes,
+                        std::mutex &console_mutex,
+                        std::mutex &ordered_results_mutex,
+                        std::atomic<bool> &should_stop,
+                        std::ostream &output_stream, bool showLineNumbers,
+                        bool dryRun,
+                        std::vector<std::pair<fs::path, std::string>>
+                            &thread_local_results // Thread-local result buffer
+) {
   for (const auto &path : chunk) {
     if (should_stop)
       break;
     try {
       std::string file_content = process_single_file(
-          path, maxFileSizeB, removeComments,
-          showFilenameOnly, dirPath, removeEmptyLines, showLineNumbers, dryRun);
+          path, maxFileSizeB, removeComments, showFilenameOnly, dirPath,
+          removeEmptyLines, showLineNumbers, dryRun);
       if (!file_content.empty()) {
         total_bytes += fs::file_size(path);
 
-        thread_local_results.emplace_back(path, file_content); // Append to thread-local buffer
+        thread_local_results.emplace_back(
+            path, file_content); // Append to thread-local buffer
       }
       ++processed_files;
     } catch (const std::exception &e) {
@@ -643,8 +662,11 @@ void process_file_chunk(
     }
   }
   if (!thread_local_results.empty()) {
-    std::lock_guard<std::mutex> lock(ordered_results_mutex); // Lock only once per thread chunk
-    results.insert(results.end(), thread_local_results.begin(), thread_local_results.end()); // Merge thread-local buffer into shared result
+    std::lock_guard<std::mutex> lock(
+        ordered_results_mutex); // Lock only once per thread chunk
+    results.insert(results.end(), thread_local_results.begin(),
+                   thread_local_results
+                       .end()); // Merge thread-local buffer into shared result
   }
 }
 
@@ -688,9 +710,8 @@ void process_last_files(const std::vector<fs::path> &last_files_list,
       break;
     std::string file_content = process_single_file(
         file, config.maxFileSizeB, config.removeComments,
-        config.showFilenameOnly,
-        config.dirPath, config.removeEmptyLines, config.showLineNumbers,
-        dryRun);
+        config.showFilenameOnly, config.dirPath, config.removeEmptyLines,
+        config.showLineNumbers, dryRun);
     if (!file_content.empty()) {
       if (!dryRun) {
         std::lock_guard<std::mutex> lock(console_mutex);
@@ -711,11 +732,13 @@ bool process_file(const fs::path &path, const Config &config,
   try {
     std::string file_content = process_single_file(
         path, config.maxFileSizeB, config.removeComments,
-        config.showFilenameOnly, config.dirPath,
-        config.removeEmptyLines, config.showLineNumbers, config.dryRun);
+        config.showFilenameOnly, config.dirPath, config.removeEmptyLines,
+        config.showLineNumbers, config.dryRun);
     if (!config.dryRun && !file_content.empty()) {
       output_stream << file_content;
-    } else if (config.dryRun && not file_content.empty()) { // fix: handle empty file content in dry run too.
+    } else if (config.dryRun &&
+               not file_content.empty()) { // fix: handle empty file content in
+                                           // dry run too.
       output_stream << normalize_path(path) << "\n";
     }
   } catch (const std::exception &e) {
@@ -772,9 +795,7 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
   std::vector<std::pair<fs::path, std::string>> orderedResults;
   orderedResults.reserve(normalFiles.size());
 
-
   output_stream << "#\n";
-
 
   std::atomic<size_t> processedFiles{0};
   std::atomic<size_t> totalBytes{0};
@@ -794,11 +815,11 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
 
     threads.emplace_back([&, start, end] {
       try {
-        std::vector<std::pair<fs::path, std::string>> thread_local_results; // Thread-local buffer
+        std::vector<std::pair<fs::path, std::string>>
+            thread_local_results; // Thread-local buffer
         process_file_chunk(
             std::span{normalFiles.begin() + start, normalFiles.begin() + end},
-            config.removeComments, config.maxFileSizeB,
-            config.showFilenameOnly,
+            config.removeComments, config.maxFileSizeB, config.showFilenameOnly,
             config.dirPath, config.removeEmptyLines, orderedResults,
             processedFiles, totalBytes, consoleMutex, orderedResultsMutex,
             should_stop, output_stream, config.showLineNumbers, config.dryRun,
@@ -813,18 +834,17 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
     thread.join();
   }
 
-
-  std::lock_guard<std::mutex> lock(orderedResultsMutex); // Ensure final sort is consistent
-  std::sort(
-      orderedResults.begin(), orderedResults.end(),
-      [&normalFiles](const auto &a, const auto &b) {
-        return std::find(normalFiles.begin(), normalFiles.end(), a.first) <
-               std::find(normalFiles.begin(), normalFiles.end(), b.first);
-      });
+  std::lock_guard<std::mutex> lock(
+      orderedResultsMutex); // Ensure final sort is consistent
+  std::sort(orderedResults.begin(), orderedResults.end(),
+            [&normalFiles](const auto &a, const auto &b) {
+              return std::find(normalFiles.begin(), normalFiles.end(),
+                               a.first) <
+                     std::find(normalFiles.begin(), normalFiles.end(), b.first);
+            });
   for (const auto &result : orderedResults) {
     output_stream << result.second;
   }
-
 
   process_last_files(lastFilesList, config, should_stop, consoleMutex,
                      output_stream, config.dryRun);
@@ -997,8 +1017,7 @@ Config parse_arguments(int argc, char *argv[]) {
     } else if ((arg == "-d" || arg == "--filename-regex") && i + 1 < argc) {
       while (i + 1 < argc && argv[i + 1][0] != '-')
         config.filenameRegexFilters.emplace_back(argv[++i]);
-    }
-    else {
+    } else {
       std::cerr << "Invalid option: " << arg << "\n";
       exit(1);
     }
