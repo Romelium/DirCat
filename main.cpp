@@ -21,7 +21,9 @@ int main(int argc, char *argv[]) {
   globalShouldStop = &shouldStop;     // globalShouldStop is defined in lib.cpp
   std::signal(SIGINT, signalHandler); // signalHandler is defined in lib.cpp
 
-  // 3. Setup Output Stream
+  // 3. Setup Output Stream (Handled within processing functions now)
+  //    We still need to handle the *initial* setup if -o is used,
+  //    but the actual writing logic is passed the stream.
   std::ofstream outputFileStream;
   std::ostream *outputPtr = &std::cout; // Default to stdout
 
@@ -64,17 +66,19 @@ int main(int argc, char *argv[]) {
     }
     outputPtr = &outputFileStream; // Point to the file stream
   }
-  // Use a reference for convenience
+  // Use a reference for convenience - processing functions will use this
   std::ostream &output_stream = *outputPtr;
 
   // 4. Check Input Path (already checked for existence in parse_arguments)
   bool success = false;
   try {
     if (fs::is_regular_file(config.dirPath)) {
-      // Call processing function for a single file
+      // Call processing function for a single file, passing the output stream
       success = process_single_file_entry(config, output_stream);
     } else if (fs::is_directory(config.dirPath)) {
-      // Call processing function for a directory
+      // Call processing function for a directory.
+      // process_directory now handles its own output stream setup based on
+      // config.outputFile
       success = process_directory(config, shouldStop);
     } else {
       // Handle other file types (symlinks, sockets, etc.) if necessary, or
@@ -97,20 +101,13 @@ int main(int argc, char *argv[]) {
   }
 
   // 5. Cleanup and Return Status
-  if (outputFileStream.is_open()) {
+  //    The process_directory function now handles closing the file and
+  //    reporting success/failure messages, including the output file path.
+  //    We only need to handle the case where the stream was opened here but
+  //    processing failed *before* process_directory/process_single_file_entry
+  //    could handle it (unlikely with current structure, but good practice).
+  if (outputFileStream.is_open() && !success) {
     outputFileStream.close();
-    // Check for errors after closing the file stream
-    if (!outputFileStream) {
-      std::cerr << "ERROR: Failed to write data to output file: "
-                << normalize_path(config.outputFile) << std::endl;
-      // Override success status if file writing failed
-      success = false;
-    } else if (success && outputPtr != &std::cout) {
-      // Print final success message to console only if output went to file and
-      // processing was successful (The processing functions now print their own
-      // status messages) std::cout << "Output successfully written to: " <<
-      // normalize_path(config.outputFile) << std::endl;
-    }
   }
 
   return success ? 0 : 1; // Return 0 on success, 1 on failure

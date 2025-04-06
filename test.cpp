@@ -25,6 +25,7 @@ void cleanup_test_directories() {
   fs::remove("test_output.txt", ec); // Clean up potential output files
   fs::remove("dry_run_output.txt", ec);
   fs::remove("single_file_output.txt", ec);
+  fs::remove("summary_output.txt", ec);
   // Clear static caches between test runs if necessary (can affect gitignore
   // tests)
   gitignore_rules_cache.clear();
@@ -139,6 +140,8 @@ Config get_default_config(const fs::path &base_path) {
   // Set other defaults matching lib.cpp initial values if needed
   config.recursiveSearch = true;
   config.disableGitignore = false;
+  config.useBackticks = false; // Default is false
+  config.showSummary = false;  // Default is false
   //... etc.
   return config;
 }
@@ -446,8 +449,10 @@ void test_format_file_output() {
   fs::path base_abs = TEST_DIR_PATH;
   fs::path file_abs = base_abs / "subdir1" / "output_test.cpp";
   std::string content = "Line 1\nLine 2\r\n\nLine 4";
+  Config config = get_default_config(base_abs);
+
   std::string formatted_output =
-      format_file_output(file_abs, false, base_abs, content, false, false);
+      format_file_output(file_abs, base_abs, content, config);
   std::string expected_output =
       "\n## File: subdir1/output_test.cpp\n\n```cpp\nLine 1\nLine 2\n\nLine "
       "4\n```\n";
@@ -456,22 +461,24 @@ void test_format_file_output() {
   assert(formatted_output == expected_output);
 
   // Test filename only
-  formatted_output =
-      format_file_output(file_abs, true, base_abs, content, false, false);
+  config.showFilenameOnly = true;
+  formatted_output = format_file_output(file_abs, base_abs, content, config);
   expected_output =
       "\n## File: output_test.cpp\n\n```cpp\nLine 1\nLine 2\n\nLine 4\n```\n";
   // std::cout << "\nExpected:\n" << expected_output << "\nActual:\n" <<
   // formatted_output << std::endl; // Debug
   assert(formatted_output == expected_output);
+  config.showFilenameOnly = false; // Reset
 
   // Test remove empty lines
-  formatted_output =
-      format_file_output(file_abs, false, base_abs, content, true, false);
+  config.removeEmptyLines = true;
+  formatted_output = format_file_output(file_abs, base_abs, content, config);
   expected_output = "\n## File: subdir1/output_test.cpp\n\n```cpp\nLine "
                     "1\nLine 2\nLine 4\n```\n";
   // std::cout << "\nExpected:\n" << expected_output << "\nActual:\n" <<
   // formatted_output << std::endl; // Debug
   assert(formatted_output == expected_output);
+  config.removeEmptyLines = false; // Reset
 
   std::cout << " Passed\n";
 }
@@ -481,12 +488,39 @@ void test_format_file_output_line_numbers() {
   fs::path base_abs = TEST_DIR_PATH;
   fs::path file_abs = base_abs / "line_numbers_file.cpp";
   std::string content = "First line\nSecond line\nThird line";
-  std::string formatted_output = format_file_output(
-      file_abs, false, base_abs, content, false, true); // showLineNumbers=true
+  Config config = get_default_config(base_abs);
+  config.showLineNumbers = true; // Enable line numbers
+
+  std::string formatted_output =
+      format_file_output(file_abs, base_abs, content, config);
   std::string expected_output =
       "\n## File: line_numbers_file.cpp\n\n```cpp\n1 | First line\n2 | Second "
       "line\n3 | Third line\n```\n";
   assert(formatted_output == expected_output);
+  std::cout << " Passed\n";
+}
+
+void test_format_file_output_backticks() {
+  std::cout << "Test: Format file output with backticks..." << std::flush;
+  fs::path base_abs = TEST_DIR_PATH;
+  fs::path file_abs = base_abs / "subdir1" / "backtick_test.cpp";
+  std::string content = "Content here";
+  Config config = get_default_config(base_abs);
+  config.useBackticks = true; // Enable backticks
+
+  std::string formatted_output =
+      format_file_output(file_abs, base_abs, content, config);
+  std::string expected_output =
+      "\n## File: `subdir1/backtick_test.cpp`\n\n```cpp\nContent here\n```\n";
+  assert(formatted_output == expected_output);
+
+  // Test filename only with backticks
+  config.showFilenameOnly = true;
+  formatted_output = format_file_output(file_abs, base_abs, content, config);
+  expected_output =
+      "\n## File: `backtick_test.cpp`\n\n```cpp\nContent here\n```\n";
+  assert(formatted_output == expected_output);
+
   std::cout << " Passed\n";
 }
 
@@ -710,16 +744,6 @@ void test_process_directory_output_order() {
   config.lastDirsSetRel.insert(normalize_path("subdir1"));
 
   // Capture output
-  std::stringstream output_buffer;
-  bool success = process_directory(config, stop_flag); // Use buffer directly
-  assert(success);
-
-  std::string output =
-      output_buffer
-          .str(); // If process_directory wrote to cout, capture it instead. For
-                  // now assume it writes internally to the stream passed
-
-  // We need to capture stdout if process_directory writes there
   std::string captured_output = capture_stdout([&]() {
     bool success_stdout = process_directory(config, stop_flag);
     assert(success_stdout);
@@ -877,6 +901,46 @@ void test_dry_run_mode() {
   std::cout << " Passed\n";
 }
 
+void test_dry_run_mode_backticks() {
+  std::cout << "Test: Dry run mode with backticks..." << std::flush;
+  create_test_directory_structure();
+  fs::path base_abs = TEST_DIR_PATH;
+  Config config = get_default_config(base_abs);
+  config.dryRun = true;
+  config.useBackticks = true; // Enable backticks
+  std::atomic<bool> stop_flag{false};
+
+  // Expected normal files (relative paths, sorted)
+  std::vector<std::string> expected_normal = {
+      ".hidden_file.cpp", "FILE3.HPP", "file1.cpp",
+      "file4.excluded",   "file5",     "file_abc.cpp",
+      "file_def.cpp",     "misc.data", "not_ignored_folder/file8.cpp",
+      "subdir1/file6.cpp"};
+  std::sort(expected_normal.begin(), expected_normal.end());
+
+  std::string output = capture_stdout([&]() {
+    bool success = process_directory(config, stop_flag);
+    assert(success);
+  });
+  // std::cout << "\nDry Run Backticks Output:\n" << output << std::endl; //
+  // Debug
+
+  assert(output.find("Files to be processed") != std::string::npos);
+  assert(output.find("--- Normal Files (10) ---") != std::string::npos);
+  assert(output.find("--- Last Files (0) ---") != std::string::npos);
+
+  // Check for presence of expected relative paths enclosed in backticks
+  for (const auto &expected_path : expected_normal) {
+    assert(output.find("`" + expected_path + "`") != std::string::npos);
+  }
+
+  // Check excluded files are not present
+  assert(output.find("`file2.txt`") == std::string::npos);
+  assert(output.find("## File:") == std::string::npos);
+
+  std::cout << " Passed\n";
+}
+
 void test_dry_run_mode_output_file() {
   std::cout << "Test: Dry run mode with output file..." << std::flush;
   create_test_directory_structure();
@@ -921,11 +985,7 @@ void test_single_file_input() {
 
   // Simulate command line: dircat test_dir/file1.cpp
   std::string file_path_str = file_path.string();
-  char *argv[] = {
-      (char *)"dircat",
-      file_path_str
-          .data()}; // Use data() or const_cast<char*>(file_path_str.c_str()) if
-                    // needed, but prefer data() for non-const ptr
+  char *argv[] = {(char *)"dircat", file_path_str.data()};
   int argc = 2;
 
   Config config = parse_arguments(argc, argv);
@@ -947,9 +1007,7 @@ void test_single_file_input() {
          std::string::npos); // Check content present
 
   // Test dry run for single file
-  // FIX: Store string result to avoid dangling pointer from temporary
-  std::string file_path_str_dry =
-      file_path.string(); // Re-store (or reuse file_path_str)
+  std::string file_path_str_dry = file_path.string();
   char *argv_dry[] = {(char *)"dircat", file_path_str_dry.data(), (char *)"-D"};
   int argc_dry = 3;
   Config config_dry = parse_arguments(argc_dry, argv_dry);
@@ -976,7 +1034,6 @@ void test_single_file_input_output_file() {
   fs::remove(output_file);
 
   // Simulate command line: dircat test_dir/file1.cpp -o single_file_output.txt
-  // FIX: Store string results to avoid dangling pointers from temporaries
   std::string file_path_str_out = file_path.string();
   std::string output_file_str = output_file.string();
   char *argv[] = {(char *)"dircat", file_path_str_out.data(), (char *)"-o",
@@ -1014,6 +1071,144 @@ void test_single_file_input_output_file() {
   std::cout << " Passed\n";
 }
 
+void test_summary_output() {
+  std::cout << "Test: Summary output..." << std::flush;
+  create_test_directory_structure();
+  fs::path base_abs = TEST_DIR_PATH;
+  Config config = get_default_config(base_abs);
+  config.showSummary = true; // Enable summary
+  std::atomic<bool> stop_flag{false};
+
+  // Expected normal files (relative paths, sorted by output order)
+  std::vector<std::string> expected_paths = {
+      ".hidden_file.cpp", "FILE3.HPP", "file1.cpp",
+      "file4.excluded",   "file5",     "file_abc.cpp",
+      "file_def.cpp",     "misc.data", "not_ignored_folder/file8.cpp",
+      "subdir1/file6.cpp"};
+  // Sort alphabetically by path for comparison with collected normal files
+  std::sort(expected_paths.begin(), expected_paths.end());
+
+  std::string output = capture_stdout([&]() {
+    bool success = process_directory(config, stop_flag);
+    assert(success);
+  });
+  // std::cout << "\nSummary Output:\n" << output << std::endl; // Debug
+
+  // Check for summary header
+  size_t summary_pos = output.find("\n---\nProcessed Files (10):\n");
+  assert(summary_pos != std::string::npos);
+
+  // Check for presence of all expected paths *after* the summary header
+  for (const auto &expected_path : expected_paths) {
+    assert(output.find(expected_path + "\n", summary_pos) != std::string::npos);
+  }
+
+  // Check order in summary (should match output order - alphabetical for normal
+  // files)
+  size_t last_pos = summary_pos;
+  for (const auto &expected_path : expected_paths) {
+    size_t current_pos = output.find(expected_path + "\n", last_pos);
+    assert(current_pos != std::string::npos);
+    assert(current_pos >= last_pos);
+    last_pos = current_pos;
+  }
+
+  // Check that summary is not present in dry run
+  config.dryRun = true;
+  std::string output_dry = capture_stdout([&]() {
+    bool success = process_directory(config, stop_flag);
+    assert(success);
+  });
+  assert(output_dry.find("\n---\nProcessed Files") == std::string::npos);
+
+  std::cout << " Passed\n";
+}
+
+void test_summary_output_with_last() {
+  std::cout << "Test: Summary output with --last..." << std::flush;
+  create_test_directory_structure();
+  fs::path base_abs = TEST_DIR_PATH;
+  Config config = get_default_config(base_abs);
+  config.showSummary = true; // Enable summary
+  // Make FILE3.HPP and subdir1/ contents last
+  config.lastFiles.push_back("FILE3.HPP");
+  config.lastDirs.push_back("subdir1");
+  // Manually populate sets
+  config.lastFilesSetFilename.insert(normalize_path("FILE3.HPP"));
+  config.lastDirsSetRel.insert(normalize_path("subdir1"));
+  std::atomic<bool> stop_flag{false};
+
+  // Expected paths in summary order: normal alphabetical, then last dir, then
+  // last file
+  std::vector<std::string> expected_summary_order = {
+      ".hidden_file.cpp",  "file1.cpp",
+      "file4.excluded",    "file5",
+      "file_abc.cpp",      "file_def.cpp",
+      "misc.data",         "not_ignored_folder/file8.cpp",
+      "subdir1/file6.cpp", // Belongs to last dir 'subdir1'
+      "FILE3.HPP"          // Last file
+  };
+
+  std::string output = capture_stdout([&]() {
+    bool success = process_directory(config, stop_flag);
+    assert(success);
+  });
+  // std::cout << "\nSummary Last Output:\n" << output << std::endl; // Debug
+
+  // Check for summary header (8 normal + 2 last = 10 total)
+  size_t summary_pos = output.find("\n---\nProcessed Files (10):\n");
+  assert(summary_pos != std::string::npos);
+
+  // Check order in summary
+  size_t last_pos = summary_pos;
+  for (const auto &expected_path : expected_summary_order) {
+    size_t current_pos = output.find(expected_path + "\n", last_pos);
+    assert(current_pos != std::string::npos);
+    assert(current_pos >= last_pos);
+    last_pos = current_pos;
+  }
+
+  std::cout << " Passed\n";
+}
+
+void test_summary_output_backticks() {
+  std::cout << "Test: Summary output with backticks..." << std::flush;
+  create_test_directory_structure();
+  fs::path base_abs = TEST_DIR_PATH;
+  Config config = get_default_config(base_abs);
+  config.showSummary = true;  // Enable summary
+  config.useBackticks = true; // Enable backticks
+  std::atomic<bool> stop_flag{false};
+
+  // Expected normal files (relative paths, sorted)
+  std::vector<std::string> expected_paths = {
+      ".hidden_file.cpp", "FILE3.HPP", "file1.cpp",
+      "file4.excluded",   "file5",     "file_abc.cpp",
+      "file_def.cpp",     "misc.data", "not_ignored_folder/file8.cpp",
+      "subdir1/file6.cpp"};
+  std::sort(expected_paths.begin(), expected_paths.end());
+
+  std::string output = capture_stdout([&]() {
+    bool success = process_directory(config, stop_flag);
+    assert(success);
+  });
+  // std::cout << "\nSummary Backticks Output:\n" << output << std::endl; //
+  // Debug
+
+  // Check for summary header
+  size_t summary_pos = output.find("\n---\nProcessed Files (10):\n");
+  assert(summary_pos != std::string::npos);
+
+  // Check for presence of all expected paths *after* the summary header, with
+  // backticks
+  for (const auto &expected_path : expected_paths) {
+    assert(output.find("`" + expected_path + "`\n", summary_pos) !=
+           std::string::npos);
+  }
+
+  std::cout << " Passed\n";
+}
+
 int main() {
   try {
     // Setup common resources once if needed, or per test
@@ -1034,6 +1229,7 @@ int main() {
     test_remove_cpp_comments();
     test_format_file_output();              // Uses TEST_DIR_PATH
     test_format_file_output_line_numbers(); // Uses TEST_DIR_PATH
+    test_format_file_output_backticks();    // Uses TEST_DIR_PATH (NEW)
     test_process_single_file();             // Uses TEST_DIR_PATH
     test_is_last_file();                    // Uses TEST_DIR_PATH
     test_collect_files_normal();            // Uses TEST_DIR_PATH
@@ -1044,9 +1240,13 @@ int main() {
     test_output_to_file();                  // Uses TEST_DIR_PATH
     test_output_file_creation();            // Uses TEST_DIR_PATH
     test_dry_run_mode();                    // Uses TEST_DIR_PATH
+    test_dry_run_mode_backticks();          // Uses TEST_DIR_PATH (NEW)
     test_dry_run_mode_output_file();        // Uses TEST_DIR_PATH
     test_single_file_input();               // Uses TEST_DIR_PATH
     test_single_file_input_output_file();   // Uses TEST_DIR_PATH
+    test_summary_output();                  // Uses TEST_DIR_PATH (NEW)
+    test_summary_output_with_last();        // Uses TEST_DIR_PATH (NEW)
+    test_summary_output_backticks();        // Uses TEST_DIR_PATH (NEW)
 
     // Cleanup after all tests
     cleanup_test_directories();

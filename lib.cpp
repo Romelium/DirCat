@@ -50,6 +50,8 @@ struct Config {
   fs::path outputFile; // Absolute or relative path
   bool showLineNumbers = false;
   bool dryRun = false;
+  bool useBackticks = false; // NEW: Option to wrap paths in backticks
+  bool showSummary = false;  // NEW: Option to show summary list at the end
 
   // --- Performance Optimizations ---
   // Sets for faster lookups in is_last_file (populated in parse_arguments)
@@ -219,9 +221,8 @@ std::string gitignore_pattern_to_regex_string(const std::string &pattern) {
 }
 
 // Compiles and caches regex pattern
-// FIX: Removed reg from regex_string parameter name
 std::regex compile_and_cache_regex(const std::string &pattern_key,
-                                   const std::string regex_string) {
+                                   const std::string &regex_string) {
   {
     std::shared_lock<std::shared_mutex> lock(regex_cache_mutex);
     auto it = regex_cache.find(pattern_key);
@@ -231,13 +232,11 @@ std::regex compile_and_cache_regex(const std::string &pattern_key,
   }
   // Compile and cache (with write lock)
   try {
-    // FIX: Use correct parameter name regex_string
     std::regex compiled(regex_string, std::regex::icase | std::regex::optimize);
     std::unique_lock<std::shared_mutex> lock(regex_cache_mutex);
     regex_cache[pattern_key] = compiled; // Cache successful compilation
     return compiled;
   } catch (const std::regex_error &e) {
-    // FIX: Use correct parameter name regex_string
     std::cerr << "WARNING: Invalid regex generated from pattern '"
               << pattern_key << "': '" << regex_string << "' (" << e.what()
               << ")\n";
@@ -481,8 +480,6 @@ bool should_ignore_folder(
     // Ensure ignoredStr ends with '/' for directory matching logic
     if (ignoredStr.empty())
       continue;
-    if (ignoredStr.empty())
-      continue;
     // Check if the path being checked IS the ignored directory, OR
     // if the path being checked STARTS WITH the ignored directory name + '/'
     if (relativePathStr == ignoredStr ||
@@ -555,11 +552,9 @@ bool should_ignore_file(
 // --- Regex Filters ---
 
 // Helper to get/compile/cache regex
-// FIX: Removed reg from regexStr parameter name
-std::regex get_compiled_regex(const std::string regexStr) {
+std::regex get_compiled_regex(const std::string &regexStr) {
   {
     std::shared_lock<std::shared_mutex> lock(regex_cache_mutex);
-    // FIX: Use correct parameter name regexStr
     auto it = regex_cache.find(regexStr);
     if (it != regex_cache.end()) {
       return it->second;
@@ -568,19 +563,15 @@ std::regex get_compiled_regex(const std::string regexStr) {
   // Compile and cache
   try {
     // Use optimize flag if available and potentially useful
-    // FIX: Use correct parameter name regexStr
     std::regex compiled(regexStr, std::regex::optimize);
     std::unique_lock<std::shared_mutex> lock(regex_cache_mutex);
-    // FIX: Use correct parameter name regexStr
     regex_cache[regexStr] = compiled; // Cache success
     return compiled;
   } catch (const std::regex_error &e) {
-    // FIX: Use correct parameter name regexStr
     std::cerr << "ERROR: Invalid regex: '" << regexStr << "': " << e.what()
               << '\n';
     std::regex empty; // Matches nothing
     std::unique_lock<std::shared_mutex> lock(regex_cache_mutex);
-    // FIX: Use correct parameter name regexStr
     regex_cache[regexStr] = empty; // Cache empty on error
     return empty;
   }
@@ -588,17 +579,12 @@ std::regex get_compiled_regex(const std::string regexStr) {
 
 // Check if filename matches any exclusion regex
 bool matches_regex_filters(const fs::path &path,
-                           // FIX: Removed reg from regex_filters parameter name
-                           const std::vector<std::string> regex_filters) {
-  // FIX: Use correct parameter name regex_filters
+                           const std::vector<std::string> &regex_filters) {
   if (regex_filters.empty())
     return false; // No filters means no exclusion based on this
 
   const std::string filename = path.filename().string(); // Get filename part
-  // FIX: Use correct loop variable name regexStr and parameter name
-  // regex_filters
-  for (const auto regexStr : regex_filters) {
-    // FIX: Use correct variable name regexStr
+  for (const auto &regexStr : regex_filters) {
     std::regex compiled_regex = get_compiled_regex(regexStr);
     if (std::regex_search(filename, compiled_regex)) { // search = find anywhere
       return true; // Exclude if any filter matches
@@ -615,9 +601,7 @@ bool matches_filename_regex_filters(
     return true; // No filters means include all (that passed other checks)
 
   const std::string filename = path.filename().string();
-  // FIX: Use correct loop variable name regexStr
-  for (const auto regexStr : filename_regex_filters) {
-    // FIX: Use correct variable name regexStr
+  for (const auto &regexStr : filename_regex_filters) {
     std::regex compiled_regex = get_compiled_regex(regexStr);
     // Use regex_match: the pattern must match the *entire* filename
     if (std::regex_match(filename, compiled_regex)) {
@@ -690,14 +674,14 @@ std::string remove_cpp_comments(const std::string &code) {
 }
 
 // Uses string_view for line processing (minor optimization)
+// Now accepts Config to check useBackticks
 std::string
-format_file_output(const fs::path &absolute_path, bool showFilenameOnly,
+format_file_output(const fs::path &absolute_path,
                    const fs::path &base_abs_path, // Base directory path
-                   const std::string &file_content, bool removeEmptyLines,
-                   bool showLineNumbers) {
+                   const std::string &file_content, const Config &config) {
   std::stringstream content_buffer; // Use stringstream for easier formatting
   fs::path displayPath;
-  if (showFilenameOnly) {
+  if (config.showFilenameOnly) {
     displayPath = absolute_path.filename();
   } else {
     try {
@@ -708,7 +692,15 @@ format_file_output(const fs::path &absolute_path, bool showFilenameOnly,
     }
   }
 
-  content_buffer << "\n## File: " << normalize_path(displayPath) << "\n\n```";
+  std::string normalizedDisplayPath = normalize_path(displayPath);
+  content_buffer << "\n## File: ";
+  if (config.useBackticks) {
+    content_buffer << "`" << normalizedDisplayPath << "`";
+  } else {
+    content_buffer << normalizedDisplayPath;
+  }
+  content_buffer << "\n\n```";
+
   if (absolute_path.has_extension()) {
     std::string ext = absolute_path.extension().string();
     if (ext.length() > 1)
@@ -735,8 +727,8 @@ format_file_output(const fs::path &absolute_path, bool showFilenameOnly,
     bool is_empty_line =
         (line.find_first_not_of(" \t") == std::string_view::npos);
 
-    if (!removeEmptyLines || !is_empty_line) {
-      if (showLineNumbers) {
+    if (!config.removeEmptyLines || !is_empty_line) {
+      if (config.showLineNumbers) {
         content_buffer << lineNumber++ << " | ";
       }
       content_buffer << line << '\n'; // Add the newline back
@@ -751,7 +743,7 @@ format_file_output(const fs::path &absolute_path, bool showFilenameOnly,
   if (!file_content.empty() && file_content.back() != '\n') {
     // content_buffer << '\n'; // Add final newline if missing - loop handles
     // this.
-  } else if (file_content.empty() && showLineNumbers) {
+  } else if (file_content.empty() && config.showLineNumbers) {
     // content_buffer << "1 | \n"; // Show line number 1 for empty file? Let's
     // show nothing.
   } else if (file_content.empty()) {
@@ -764,17 +756,19 @@ format_file_output(const fs::path &absolute_path, bool showFilenameOnly,
 }
 
 // Removed redundant file size check (Improvement 6)
+// Now passes Config to format_file_output
 std::string
 process_single_file(const fs::path &absolute_path, // Must be absolute
                     const Config &config,          // Pass config
                     const fs::path &base_abs_path  // Base directory
 ) {
   if (config.dryRun) {
-    // For dry run, we just need to format the header part
-    // Ensure empty string is handled correctly by format_file_output
-    return format_file_output(absolute_path, config.showFilenameOnly,
-                              base_abs_path, "", config.removeEmptyLines,
-                              config.showLineNumbers);
+    // For dry run, we just need to format the header part (or just return the
+    // path) For consistency with process_directory dry run, let's just return
+    // the path info needed there. The formatting happens in process_directory.
+    // However, process_single_file_entry needs formatting. Let's keep the
+    // formatting here for now.
+    return format_file_output(absolute_path, base_abs_path, "", config);
   }
 
   std::ifstream file(absolute_path, std::ios::binary);
@@ -796,10 +790,9 @@ process_single_file(const fs::path &absolute_path, // Must be absolute
     fileContent = remove_cpp_comments(fileContent);
   }
 
-  // Pass base path for relative path calculation in formatting
-  return format_file_output(absolute_path, config.showFilenameOnly,
-                            base_abs_path, fileContent, config.removeEmptyLines,
-                            config.showLineNumbers);
+  // Pass base path and config for relative path calculation and formatting
+  // options
+  return format_file_output(absolute_path, base_abs_path, fileContent, config);
 }
 
 // --- File Collection ---
@@ -1232,15 +1225,18 @@ void process_file_chunk(
 
 // Uses stringstream buffering for output (Improvement 3)
 // Expects absolute paths in last_files_list
-void process_last_files(const std::vector<fs::path> &last_files_list_abs,
-                        const Config &config, std::atomic<bool> &should_stop,
-                        std::mutex &output_mutex, std::ostream &output_stream) {
+// Returns the list of absolute paths sorted according to --last rules
+std::vector<fs::path>
+process_last_files(const std::vector<fs::path> &last_files_list_abs,
+                   const Config &config, std::atomic<bool> &should_stop,
+                   std::mutex &output_mutex, std::ostream &output_stream) {
   if (last_files_list_abs.empty())
-    return;
+    return {};
 
   const fs::path base_abs_path = config.dirPath; // Base path is needed
 
   // Helper to get the sorting position based on --last arguments order
+  // (Copied from process_directory for use here)
   auto get_sort_position = [&](const fs::path &absPath) -> int {
     fs::path relativePath;
     try {
@@ -1302,14 +1298,19 @@ void process_last_files(const std::vector<fs::path> &last_files_list_abs,
       break;
 
     if (config.dryRun) {
-      // In dry run, list relative path
+      // In dry run, list relative path, potentially with backticks
+      std::string relPathStr = "??"; // Default if relative fails
       try {
-        last_files_buffer << normalize_path(fs::relative(absolute_file_path,
-                                                         base_abs_path))
-                          << "\n";
+        relPathStr =
+            normalize_path(fs::relative(absolute_file_path, base_abs_path));
       } catch (const std::exception &) {
-        last_files_buffer << normalize_path(absolute_file_path.filename())
-                          << " (relative path failed)\n";
+        relPathStr = normalize_path(absolute_file_path.filename()) +
+                     " (relative path failed)";
+      }
+      if (config.useBackticks) {
+        last_files_buffer << "`" << relPathStr << "`\n";
+      } else {
+        last_files_buffer << relPathStr << "\n";
       }
     } else {
       // Process the file and append its formatted output
@@ -1327,11 +1328,14 @@ void process_last_files(const std::vector<fs::path> &last_files_list_abs,
     output_stream << last_files_buffer.str();
   }
   // --- End Improvement 3 ---
+
+  return sorted_last_files; // Return the sorted list
 }
 
 // --- Main Processing Functions ---
 
 // Wrapper for single file processing used by main() if input is a file
+// Now handles summary output
 bool process_single_file_entry(const Config &config,
                                std::ostream &output_stream) {
   if (!fs::is_regular_file(config.dirPath)) {
@@ -1345,9 +1349,12 @@ bool process_single_file_entry(const Config &config,
   try {
     if (config.dryRun) {
       output_stream << "File to be processed:\n";
-      // Output the original path provided by user? Or the absolute path? Let's
-      // use absolute normalized.
-      output_stream << normalize_path(config.dirPath) << "\n";
+      std::string normPath = normalize_path(config.dirPath);
+      if (config.useBackticks) {
+        output_stream << "`" << normPath << "`\n";
+      } else {
+        output_stream << normPath << "\n";
+      }
     } else {
       // Process the single file
       std::string file_content_output =
@@ -1355,6 +1362,17 @@ bool process_single_file_entry(const Config &config,
       if (!file_content_output.empty()) {
         output_stream << "# File generated by DirCat\n"; // Add header
         output_stream << file_content_output;
+
+        // Add summary if requested
+        if (config.showSummary) {
+          output_stream << "\n---\nProcessed Files (1):\n";
+          std::string filename = normalize_path(config.dirPath.filename());
+          if (config.useBackticks) {
+            output_stream << "`" << filename << "`\n";
+          } else {
+            output_stream << filename << "\n";
+          }
+        }
       } else {
         // File was skipped or empty, print message to cerr if outputting to
         // cout
@@ -1374,6 +1392,7 @@ bool process_single_file_entry(const Config &config,
 
 // Main function for processing a directory
 // Uses optimized sort and chunk processing (Improvement 1)
+// Now handles summary output
 bool process_directory(Config config, std::atomic<bool> &should_stop) {
   if (!fs::is_directory(config.dirPath)) {
     std::cerr << "ERROR: process_directory called with non-directory path: "
@@ -1441,11 +1460,16 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
     }
     std::sort(normalRelativePaths.begin(), normalRelativePaths.end());
     for (const auto &relPath : normalRelativePaths) {
-      output_stream << relPath << "\n";
+      if (config.useBackticks) {
+        output_stream << "`" << relPath << "`\n";
+      } else {
+        output_stream << relPath << "\n";
+      }
     }
 
     output_stream << "--- Last Files (" << lastFilesListAbs.size() << ") ---\n";
     std::mutex output_mutex_dry; // Dummy mutex needed for function signature
+    // process_last_files handles its own dry run output formatting now
     process_last_files(lastFilesListAbs, config, should_stop, output_mutex_dry,
                        output_stream);
     return true; // Dry run finished
@@ -1499,7 +1523,7 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
                                             end_index - start_index};
 
     threads.emplace_back(
-        // FIX: Capture output_mutex by reference for cerr locking
+        // Capture output_mutex by reference for cerr locking
         [&config, &base_abs_path, &processedFiles, &totalBytes, &should_stop,
          &results_buffer = thread_results[i], &output_mutex](
             std::span<const fs::path> chunk, size_t chunk_idx_start) {
@@ -1554,10 +1578,63 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
   }
 
   // --- Process and Write Last Files (handles own locking/buffering) ---
+  std::vector<fs::path> sortedLastFilesAbs; // To store for summary
   if (!should_stop) {
-    process_last_files(lastFilesListAbs, config, should_stop, output_mutex,
-                       output_stream);
+    sortedLastFilesAbs = process_last_files(
+        lastFilesListAbs, config, should_stop, output_mutex, output_stream);
   }
+
+  // --- NEW: Append Summary List ---
+  if (!should_stop && config.showSummary && !config.dryRun) {
+    std::vector<std::string> summaryRelativePaths;
+    summaryRelativePaths.reserve(orderedResults.size() +
+                                 sortedLastFilesAbs.size());
+
+    // Add normal files (already sorted by output order)
+    for (const auto &result_tuple : orderedResults) {
+      const auto &absPath = std::get<1>(result_tuple);
+      try {
+        std::string relPathStr =
+            normalize_path(fs::relative(absPath, base_abs_path));
+        if (config.useBackticks) {
+          summaryRelativePaths.push_back("`" + relPathStr + "`");
+        } else {
+          summaryRelativePaths.push_back(relPathStr);
+        }
+      } catch (...) {
+        summaryRelativePaths.push_back(normalize_path(absPath.filename()) +
+                                       " (relative error)");
+      }
+    }
+
+    // Add last files (already sorted by process_last_files)
+    for (const auto &absPath : sortedLastFilesAbs) {
+      try {
+        std::string relPathStr =
+            normalize_path(fs::relative(absPath, base_abs_path));
+        if (config.useBackticks) {
+          summaryRelativePaths.push_back("`" + relPathStr + "`");
+        } else {
+          summaryRelativePaths.push_back(relPathStr);
+        }
+      } catch (...) {
+        summaryRelativePaths.push_back(normalize_path(absPath.filename()) +
+                                       " (relative error)");
+      }
+    }
+
+    // Write summary section (needs lock if threads could still be writing
+    // errors?) Use the main output mutex for safety.
+    if (!summaryRelativePaths.empty()) {
+      std::lock_guard<std::mutex> lock(output_mutex);
+      output_stream << "\n---\nProcessed Files (" << summaryRelativePaths.size()
+                    << "):\n";
+      for (const auto &pathStr : summaryRelativePaths) {
+        output_stream << pathStr << "\n";
+      }
+    }
+  }
+  // --- End Summary List ---
 
   // --- Cleanup & Reporting ---
   std::string final_message;
@@ -1581,7 +1658,6 @@ bool process_directory(Config config, std::atomic<bool> &should_stop) {
 
   } else {
     // Print stats to console if output was stdout
-    // FIX: Use std::ios_base::end instead of std::ios_end
     ss_msg.seekp(0, std::ios_base::end); // Ensure writing at the end
     ss_msg << "Output sent to stdout." << std::endl;
     final_message = ss_msg.str();
@@ -1611,7 +1687,7 @@ void signalHandler(int signum) {
 }
 
 // --- Argument Parsing (Adds population of Config sets - Improvement 4) ---
-
+// Updated with --backticks and --summary
 Config parse_arguments(int argc, char *argv[]) {
   Config config;
 
@@ -1635,16 +1711,15 @@ Config parse_arguments(int argc, char *argv[]) {
          "tmp)."},
         {"-i, --ignore <item...>",
          "Ignore specific files or folders relative to the base directory "
-         "(e.g., -i build node_modules/ secret.key). Folder ignores should end "
-         "with '/'. Uses gitignore-style matching."},
+         "(e.g., -i build node_modules/ secret.key)."},
         {"-r, --regex <pattern...>",
          "Exclude files whose *filename* matches any specified regex pattern "
-         "(case-sensitive)."},
+         "(ECMAScript syntax)."},
         {"-d, --filename-regex <pattern...>",
          "Include only files whose *filename* matches any specified regex "
-         "pattern (case-sensitive)."},
+         "pattern (ECMAScript syntax)."},
         {"-c, --remove-comments",
-         "Attempt to remove C-style comments (//, /* */)."},
+         "Attempt to remove C++ style comments (//, /* */)."},
         {"-l, --remove-empty-lines",
          "Remove empty lines (containing only whitespace) from output."},
         {"-f, --filename-only",
@@ -1661,6 +1736,12 @@ Config parse_arguments(int argc, char *argv[]) {
         {"-o, --output <file>", "Write output to <file> instead of stdout."},
         {"-D, --dry-run",
          "List files that would be processed, without concatenating content."},
+        {"-b, --backticks",
+         "Enclose file paths in backticks (`) in headers, dry-run, and "
+         "summary."}, // NEW
+        {"-s, --summary",
+         "Append a summary list of processed files at the end (normal run "
+         "only)."}, // NEW
         {"-h, --help", "Show this help message."}};
 
     size_t max_option_length = 0;
@@ -1832,6 +1913,10 @@ Config parse_arguments(int argc, char *argv[]) {
       config.outputFile = argv[++i];
     } else if (arg == "-D" || arg == "--dry-run") {
       config.dryRun = true;
+    } else if (arg == "-b" || arg == "--backticks") { // NEW
+      config.useBackticks = true;
+    } else if (arg == "-s" || arg == "--summary") { // NEW
+      config.showSummary = true;
     } else {
       std::cerr << "ERROR: Unknown or invalid option: " << arg << "\n\n";
       print_usage();
