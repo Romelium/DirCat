@@ -1,3 +1,11 @@
+> **⚠️ Project Archived & Deprecated**
+>
+> This C++ version of DirCat is now **archived and deprecated**. It has been replaced by a more modern, feature-rich, and actively maintained version written in Rust.
+>
+> Please use the new version: **[dircat-rust](https://github.com/romelium/dircat-rust)**
+
+---
+
 # DirCat
 
 DirCat is a high-performance C++ utility that concatenates and displays the contents of files within a directory, functioning as a directory-aware version of the Unix `cat` command but for directories. Engineered for efficiency and flexibility, DirCat leverages multi-threading, recursive directory traversal, and comprehensive file filtering options to streamline content aggregation from directories. It's ideal for developers, writers, and anyone needing to combine multiple text-based files into a single output for documentation, analysis, or code review.
